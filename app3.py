@@ -12,6 +12,7 @@ import time
 import textwrap
 import tkinter as tk
 from dataclasses import dataclass
+from typing import Any, Callable, Optional, TypeVar
 
 # ============================================================
 # Constants
@@ -20,7 +21,7 @@ FONT = "Helvetica"
 IS_MAC = sys.platform == "darwin"
 HAND = "pointinghand" if IS_MAC else "hand2"
 PIXEL_FONT = "Monaco" if IS_MAC else "Courier"
-SLOWMO = {"Fast": 1.6, "Normal": 1.0, "Cinematic": 0.7}   # animation speed multipliers
+SLOWMO = {"Fast": 1.6, "Normal": 1.0, "Cinematic": 0.7}  # animation speed multipliers
 # Bot levels: (average reaction ms, spread ms, chance it jumps the gun)
 BOT_LEVELS = {"Easy": (480, 90, 0.06), "Medium": (330, 60, 0.03),
               "Hard": (240, 40, 0.012), "Brutal": (175, 22, 0.004)}
@@ -38,8 +39,8 @@ MIN_ROUNDS, MAX_ROUNDS = 1, 15
 MIN_TOO_SLOW, MAX_TOO_SLOW = 1.0, 5.0
 NAME_MAX = 12
 
-COLLECT_WINDOW_MS = 900     # how long after the first press we wait for the others
-COUNTDOWN_STEP_MS = 700     # speed of the 3-2-1 countdown
+COLLECT_WINDOW_MS = 900  # how long after the first press we wait for the others
+COUNTDOWN_STEP_MS = 700  # speed of the 3-2-1 countdown
 
 DEFAULT_KEYS = ["a", "l", "q", "p", "z", "m", "x", "n"]
 RESERVED_KEYS = {"space", "escape", "return", "tab", "f11"}
@@ -60,14 +61,14 @@ WAITING = "waiting"
 GO = "go"
 ROUND_OVER = "round_over"
 MATCH_OVER = "match_over"
-SHOWDOWN = "showdown"          # slow-mo duel animation playing (Pixel theme, 2 players)
+SHOWDOWN = "showdown"  # slow-mo duel animation playing (Pixel theme, 2 players)
 
 VOID = "void"  # marker stored in the round log for a voided round
 
 # ============================================================
 # Themes:  (background, text) for each screen state
 # ============================================================
-THEMES = {
+THEMES: dict[str, dict[str, Any]] = {
     "Classic": {
         "idle": ("#2b2d42", "#ffffff"), "wait": ("#d90429", "#ffffff"),
         "go": ("#2dc653", "#052e16"), "result": ("#3a86ff", "#ffffff"),
@@ -133,7 +134,10 @@ def key_label(key):
     return key.upper() if len(key) == 1 else key.capitalize()
 
 
-def clamp(value, low, high):
+T = TypeVar("T", int, float)
+
+
+def clamp(value: T, low: T, high: T) -> T:
     return max(low, min(high, value))
 
 
@@ -146,13 +150,13 @@ class Settings:
     countdown: bool = True
     sound: bool = True
     shake: bool = True
-    duel_anim: bool = True      # slow-mo showdown (Pixel theme, 2 players)
-    slowmo: str = "Normal"      # Fast / Normal / Cinematic
+    duel_anim: bool = True  # slow-mo showdown (Pixel theme, 2 players)
+    slowmo: str = "Normal"  # Fast / Normal / Cinematic
     theme: str = "Pixel"
-    bot_level: str = "Medium"   # Easy / Medium / Hard / Brutal
-    early_clinch: bool = True   # end the match as soon as nobody can catch the leader
-    arena: str = "Desert"       # Desert / Snow Town / Cave / Space Station
-    trainer_tempo: str = "Fast" # Fast / Rapid / Blitz
+    bot_level: str = "Medium"  # Easy / Medium / Hard / Brutal
+    early_clinch: bool = True  # end the match as soon as nobody can catch the leader
+    arena: str = "Desert"  # Desert / Snow Town / Cave / Space Station
+    trainer_tempo: str = "Fast"  # Fast / Rapid / Blitz
     fullscreen: bool = False
 
 
@@ -178,13 +182,14 @@ class FlatButton(tk.Label):
         self.style = style
         self.screen_bg = bg
         self.screen_fg = fg
-        self.size = size
+        self.font_size = size  # (not 'size': tk.Label already has a size() method)
         self.text_value = text
         self.width_chars = width
         self.pixel = bool(theme.get("pixel"))
         self.hovering = False
-        if self.pixel:       # chunky bordered pixel button, label text drawn with the bitmap font
-            self.px = max(8, padx // 2 + 2)       # padding is baked into the pixel size below
+        self._img: Optional[tk.PhotoImage] = None
+        if self.pixel:  # chunky bordered pixel button, label text drawn with the bitmap font
+            self.px = max(8, padx // 2 + 2)  # padding is baked into the pixel size below
             self.py = max(6, pady // 2 + 2)
             self.configure(padx=0, pady=0, highlightthickness=3)
         else:
@@ -214,7 +219,7 @@ class FlatButton(tk.Label):
         base, text, hover, edge = self.colors()
         bg = hover if self.hovering else base
         if self.pixel:
-            scale = pixel_scale(self.size)
+            scale = pixel_scale(self.font_size)
             img = bitmap_text_image(self.text_value, scale, text, bg, "center")
             self._img = img
             width = img.width()
@@ -225,7 +230,7 @@ class FlatButton(tk.Label):
                            highlightbackground=edge, highlightcolor=edge)
         else:
             self.configure(text=self.text_value, bg=bg, fg=text,
-                           font=(FONT, self.size, "bold"))
+                           font=(FONT, self.font_size, "bold"))
 
     def set_text(self, text):
         self.text_value = text
@@ -246,7 +251,7 @@ class FlatButton(tk.Label):
     def _release(self, event):
         inside = 0 <= event.x < self.winfo_width() and 0 <= event.y < self.winfo_height()
         if inside and self.command:
-            self.command()  # may destroy this widget; don't touch self afterwards
+            self.command()  # may destroy this widget; don't touch self afterward
 
 
 # ============================================================
@@ -334,14 +339,13 @@ _GLYPH_SRC = {
 GLYPHS = {ch: src.split("/") for ch, src in _GLYPH_SRC.items()}
 GLYPHS[" "] = ["....."] * 7
 
-
 # ---------- Pixel UI kit: bitmap text, chunky panels, full-window scenery ----------
 PANEL_BG = "#1a1c2c"
 PANEL_FG = "#f4f4f4"
 PX_ALERT = "#e43b44"
-PX_BOTTOM_W, PX_BOTTOM_H = 860, 244      # fixed size of the bottom info panel (2 players)
+PX_BOTTOM_W, PX_BOTTOM_H = 860, 244  # fixed size of the bottom info panel (2 players)
 
-_IMG_CACHE = {}
+_IMG_CACHE: dict[tuple, tk.PhotoImage] = {}
 
 
 def pixel_scale(size):
@@ -360,24 +364,24 @@ def wrap_text(text, cols):
     return "\n".join(out)
 
 
-def bitmap_text_image(text, scale, fg, bg, justify="center"):
+def bitmap_text_image(text: str, scale: int, fg: str, bg: str, justify: str = "center") -> tk.PhotoImage:
     """Render text with the 5x7 pixel font into a (cached) PhotoImage."""
     key = (text, scale, fg, bg, justify)
     img = _IMG_CACHE.get(key)
     if img is not None:
         return img
     lines = text.split("\n")
-    maxc = max(len(line) for line in lines)
-    cw = max(1, maxc * 6 - 1)
-    ch = len(lines) * 9 + 1                 # 1 blank margin row above/below, 2 between lines
+    max_chars = max(len(line) for line in lines)
+    cw = max(1, max_chars * 6 - 1)
+    ch = len(lines) * 9 + 1  # 1 blank margin row above/below, 2 between lines
     rows = [[bg] * cw for _ in range(ch)]
     for li, line in enumerate(lines):
         if justify == "left":
             off = 0
         elif justify == "right":
-            off = (maxc - len(line)) * 6
+            off = (max_chars - len(line)) * 6
         else:
-            off = (maxc - len(line)) * 3
+            off = (max_chars - len(line)) * 3
         for ci, char in enumerate(line):
             glyph = GLYPHS.get(char.upper(), GLYPHS[" "])
             for r, grow in enumerate(glyph):
@@ -403,9 +407,9 @@ class TextLabel(tk.Label):
                  pixel=False, width=0, wraplength=0, justify="center", anchor="center", **kw):
         super().__init__(parent, bd=0, highlightthickness=0, padx=0, pady=0, anchor=anchor, **kw)
         self.pixel = pixel
-        self._img = None
-        self.opts = dict(text=text, size=size, bold=bold, fg=fg, bg=bg,
-                         width=width, wrap=wraplength, justify=justify)
+        self._img: Optional[tk.PhotoImage] = None
+        self.opts: dict[str, Any] = dict(text=text, size=size, bold=bold, fg=fg, bg=bg,
+                                         width=width, wrap=wraplength, justify=justify)
         self.refresh()
 
     def set(self, text=None, fg=None, bg=None, size=None, bold=None):
@@ -454,7 +458,7 @@ def _tone(colors, target, amount):
 
 
 def _style(kind, sky, orb, ground, bits, orb_kind, orb_pos, star="#f4f4f4", stars=0, cloud=None,
-           wait_sky=None, go_sky=None, wait_orb=None, go_orb=None):
+           wait_sky=None, go_sky=None, wait_orb=None, go_orb=None) -> dict[str, Any]:
     """Describe one arena. WAIT/GO palettes are derived from the idle one unless given."""
     return dict(
         kind=kind, orb_kind=orb_kind, orb_pos=orb_pos, ground=ground, bits=bits,
@@ -468,7 +472,7 @@ def _style(kind, sky, orb, ground, bits, orb_kind, orb_pos, star="#f4f4f4", star
     )
 
 
-ARENA_STYLES = {
+ARENA_STYLES: dict[str, dict[str, Any]] = {
     "Desert": _style(
         "desert", ["#29366f", "#3b5dc9", "#5d275d", "#b13e53", "#ef7d57"], "#ffcd75",
         ("#ffcd75", "#ef7d57", "#b13e53", "#5d275d"), ("#5d275d", "#b13e53", "#ef7d57"),
@@ -504,36 +508,37 @@ class PixelBackdrop:
     def __init__(self, parent, arena="Desert"):
         self.canvas = tk.Canvas(parent, highlightthickness=0, bd=0, bg=PX_DARK)
         self.canvas.pack_propagate(False)
-        self.W = self.H = 1
-        self.ground_fn = lambda W, H: int(H * 0.70)
+        self.width = self.height = 1
+        self.ground_fn = lambda width, height: int(height * 0.70)
         self.ground = 300
         self.arena_name = arena if arena in ARENA_STYLES else "Desert"
         self.style = ARENA_STYLES[self.arena_name]
         self.palette = "idle"
         self.cloud_off = 0.0
         self.t0 = time.perf_counter()
-        self.anchors = {}
-        self.pts = {}
-        self.on_change = None
+        self.anchors: dict[str, list] = {}
+        self.pts: dict[str, list] = {}
+        self.on_change: Optional[Callable[[], None]] = None
         self.stopped = False
         self.canvas.bind("<Configure>", self._on_configure)
-        self.job = self.canvas.after(60, self.loop)
+        self.job: Optional[str] = self.canvas.after(60, self.loop)
 
     # ---------- layout ----------
     def _on_configure(self, event):
-        self.W, self.H = event.width, event.height
+        self.width, self.height = event.width, event.height
         self.apply()
 
     def apply(self):
         """Recompute the ground line from the layout rule and repaint the scenery."""
-        if self.W < 100 or self.H < 100:
+        if self.width < 100 or self.height < 100:
             return
-        self.ground = max(self.U * 10, int(self.ground_fn(self.W, self.H)) // self.U * self.U)
+        self.ground = max(self.U * 10, int(self.ground_fn(self.width, self.height)) // self.U * self.U)
         self.redraw_bg()
         self.draw_clouds()
         self.draw_ambient(time.perf_counter() - self.t0)
-        if self.on_change:
-            self.on_change()
+        callback = self.on_change
+        if callback is not None:
+            callback()
 
     def set_palette(self, name):
         if name != self.palette:
@@ -547,15 +552,15 @@ class PixelBackdrop:
             self.style = ARENA_STYLES[name]
             self.apply()
 
-    def pal(self):
+    def pal(self) -> dict[str, Any]:
         st, p = self.style, self.palette
         return dict(sky=st["sky"][p], orb=st["orb"][p], star=st["star"], cloud=st["cloud"],
                     ground=st["ground"], bits=st["bits"])
 
     # ---------- static scenery ----------
     def redraw_bg(self):
-        c, U, W, H, G = self.canvas, self.U, self.W, self.H, self.ground
-        if W < 100 or H < 100:
+        c, unit, width, height, ground = self.canvas, self.U, self.width, self.height, self.ground
+        if width < 100 or height < 100:
             return
         pal = self.pal()
         c.delete("bg")
@@ -566,188 +571,191 @@ class PixelBackdrop:
                                    fill=color, outline="", tags="bg")
 
         fractions = (0.0, 0.22, 0.44, 0.60, 0.78)
-        ys = [int(G * f) // U * U for f in fractions] + [G]
+        ys = [int(ground * f) // unit * unit for f in fractions] + [ground]
         for k, col in enumerate(pal["sky"]):
-            b(0, ys[k], W, ys[k + 1] - ys[k], col)
+            b(0, ys[k], width, ys[k + 1] - ys[k], col)
 
         rnd = random.Random(11)
         count = self.style["stars"]
-        for _ in range(max(0, W // count) if count else 0):         # fixed stars
-            b(rnd.randrange(0, W) // U * U, rnd.randrange(0, max(U, ys[3])) // U * U, U, U, pal["star"])
+        for _ in range(max(0, width // count) if count else 0):  # fixed stars
+            b(rnd.randrange(0, width) // unit * unit, rnd.randrange(0, max(unit, ys[3])) // unit * unit, unit, unit,
+              pal["star"])
         # points the ambient animation uses (twinkle, snow, fireflies)
-        self.pts["twinkle"] = [(rnd.randrange(0, W) // U * U, rnd.randrange(U, max(2 * U, ys[3])) // U * U)
-                               for _ in range(18)]
-        self.pts["snow"] = [(rnd.uniform(0, W), rnd.uniform(0, G), rnd.uniform(25, 70),
+        self.pts["twinkle"] = [
+            (rnd.randrange(0, width) // unit * unit, rnd.randrange(unit, max(2 * unit, ys[3])) // unit * unit)
+            for _ in range(18)]
+        self.pts["snow"] = [(rnd.uniform(0, width), rnd.uniform(0, ground), rnd.uniform(25, 70),
                              rnd.uniform(6, 16), rnd.choice((3, 3, 5))) for _ in range(70)]
-        self.pts["fly"] = [(rnd.uniform(0.05, 0.95) * W, rnd.uniform(0.35, 0.9) * G) for _ in range(14)]
+        self.pts["fly"] = [(rnd.uniform(0.05, 0.95) * width, rnd.uniform(0.35, 0.9) * ground) for _ in range(14)]
         self.anchors = {}
 
         self.draw_orb(b, pal)
         getattr(self, "_scenery_" + self.style["kind"])(b, pal, rnd)
 
-        edge, b1, b2, deep = pal["ground"]                          # ground
-        b(0, G, W, 2 * U, edge)
-        b(0, G + 2 * U, W, 3 * U, b1)
-        b(0, G + 5 * U, W, 8 * U, b2)
-        b(0, G + 13 * U, W, H - G - 13 * U, deep)
+        edge, b1, b2, deep = pal["ground"]  # ground
+        b(0, ground, width, 2 * unit, edge)
+        b(0, ground + 2 * unit, width, 3 * unit, b1)
+        b(0, ground + 5 * unit, width, 8 * unit, b2)
+        b(0, ground + 13 * unit, width, height - ground - 13 * unit, deep)
         bits = pal["bits"]
-        for _ in range(max(10, W * max(0, H - G) // 22000)):        # pebbles / ice / ore bits
-            px = rnd.randrange(0, max(1, W - 2 * U)) // U * U
-            py = rnd.randrange(G + 3 * U, max(G + 4 * U, H - U)) // U * U
-            b(px, py, 2 * U, U, bits[0] if py < G + 13 * U else bits[1])
-            b(px + U, py - U, U, U, bits[2])
+        for _ in range(max(10, width * max(0, height - ground) // 22000)):  # pebbles / ice / ore bits
+            px = rnd.randrange(0, max(1, width - 2 * unit)) // unit * unit
+            py = rnd.randrange(ground + 3 * unit, max(ground + 4 * unit, height - unit)) // unit * unit
+            b(px, py, 2 * unit, unit, bits[0] if py < ground + 13 * unit else bits[1])
+            b(px + unit, py - unit, unit, unit, bits[2])
         c.tag_lower("bg")
 
     def draw_orb(self, b, pal):
-        U, W, G = self.U, self.W, self.ground
+        unit, width, ground = self.U, self.width, self.ground
         kind = self.style["orb_kind"]
         fx, mode, val = self.style["orb_pos"]
-        ox = int(W * fx)
-        oy = G + val if mode == "ground" else int(G * val)
+        ox = int(width * fx)
+        oy = ground + val if mode == "ground" else int(ground * val)
         col = pal["orb"]
         if kind in ("sun", "moon", "planet"):
             r = {"sun": 50, "moon": 36, "planet": 42}[kind]
-            for dy in range(-r, r, U):
-                span = r * r - (dy + U / 2) ** 2
-                half = int(span ** 0.5 // U * U) if span > 0 else 0
-                if half > 0 and oy + dy + U <= G:
-                    b(ox - half, oy + dy, half * 2, U, col)
-            if kind == "moon":                                      # craters
+            for dy in range(-r, r, unit):
+                span = r * r - (dy + unit / 2) ** 2
+                half = int(span ** 0.5 // unit * unit) if span > 0 else 0
+                if half > 0 and oy + dy + unit <= ground:
+                    b(ox - half, oy + dy, half * 2, unit, col)
+            if kind == "moon":  # craters
                 dark = mix(col, "#000000", 0.18)
                 b(ox - 15, oy - 10, 10, 10, dark)
                 b(ox + 5, oy + 5, 10, 10, dark)
                 b(ox - 5, oy + 15, 5, 5, dark)
-            if kind == "planet":                                    # ring + stripes
+            if kind == "planet":  # ring + stripes
                 ring = mix(col, "#f4f4f4", 0.45)
-                b(ox - r - 30, oy + U, 2 * r + 60, U, ring)
-                b(ox - r - 20, oy + 2 * U, 2 * r + 40, U, mix(ring, "#000000", 0.2))
-                b(ox - 20, oy - 15, 40, U, mix(col, "#000000", 0.2))
-        elif kind == "crystal":                                     # glowing crystal cluster
+                b(ox - r - 30, oy + unit, 2 * r + 60, unit, ring)
+                b(ox - r - 20, oy + 2 * unit, 2 * r + 40, unit, mix(ring, "#000000", 0.2))
+                b(ox - 20, oy - 15, 40, unit, mix(col, "#000000", 0.2))
+        elif kind == "crystal":  # glowing crystal cluster
             def crystal(cx, k):
                 rows = 2 * k + 1
                 for i in range(rows):
-                    w = (min(i, rows - 1 - i) + 1) * U
-                    b(cx - w // 2, G - (rows - i) * U, w, U, col)
-                b(cx - U, G - (rows - 1) * U + U, U, U, "#f4f4f4")
-            crystal(ox, 5)
-            crystal(ox - 7 * U, 3)
-            crystal(ox + 8 * U, 4)
+                    w = (min(i, rows - 1 - i) + 1) * unit
+                    b(cx - w // 2, ground - (rows - i) * unit, w, unit, col)
+                b(cx - unit, ground - (rows - 1) * unit + unit, unit, unit, "#f4f4f4")
 
-    def _scenery_desert(self, b, pal, rnd):
-        U, W, G = self.U, self.W, self.ground
+            crystal(ox, 5)
+            crystal(ox - 7 * unit, 3)
+            crystal(ox + 8 * unit, 4)
+
+    def _scenery_desert(self, b, _pal, _rnd):
+        unit, width, ground = self.U, self.width, self.ground
 
         def mesa(cx, tiers, color):
-            y = G
+            y = ground
             for w, h in tiers:
                 b(cx - w // 2, y - h, w, h, color)
                 y -= h
 
-        mesa(int(W * 0.13), [(130, 24), (90, 24)], "#333c57")
-        mesa(int(W * 0.87), [(150, 24), (100, 20), (60, 18)], "#333c57")
-        mesa(W // 2, [(110, 15)], PX_PURPLE)
+        mesa(int(width * 0.13), [(130, 24), (90, 24)], "#333c57")
+        mesa(int(width * 0.87), [(150, 24), (100, 20), (60, 18)], "#333c57")
+        mesa(width // 2, [(110, 15)], PX_PURPLE)
 
         def cactus(x, h):
-            b(x - U, G - h * U, 2 * U, h * U, PX_GREEN)
-            b(x - U, G - h * U, 2 * U, U, PX_LIME)
-            ay = G - (h - 6) * U
-            b(x - 3 * U, ay - 3 * U, 2 * U, 4 * U, PX_GREEN)
-            b(x + U, ay - 5 * U, 2 * U, 5 * U, PX_GREEN)
+            b(x - unit, ground - h * unit, 2 * unit, h * unit, PX_GREEN)
+            b(x - unit, ground - h * unit, 2 * unit, unit, PX_LIME)
+            ay = ground - (h - 6) * unit
+            b(x - 3 * unit, ay - 3 * unit, 2 * unit, 4 * unit, PX_GREEN)
+            b(x + unit, ay - 5 * unit, 2 * unit, 5 * unit, PX_GREEN)
 
-        cactus(int(W * 0.045), 11)
-        cactus(int(W * 0.955), 9)
+        cactus(int(width * 0.045), 11)
+        cactus(int(width * 0.955), 9)
 
     def _scenery_snow(self, b, pal, rnd):
-        U, W, G = self.U, self.W, self.ground
+        unit, width, ground = self.U, self.width, self.ground
         hill = mix(pal["sky"][4], "#f4f4f4", 0.35)
         x = 0
-        while x < W:                                                # snowy hills
-            w, h = rnd.randrange(8, 16) * U, rnd.randrange(3, 8) * U
-            b(x, G - h, w, h, hill)
-            b(x + U, G - h - U, w - 2 * U, U, hill)
-            x += w - U
+        while x < width:  # snowy hills
+            w, h = rnd.randrange(8, 16) * unit, rnd.randrange(3, 8) * unit
+            b(x, ground - h, w, h, hill)
+            b(x + unit, ground - h - unit, w - 2 * unit, unit, hill)
+            x += w - unit
 
         def pine(x, tiers):
-            b(x - U, G - 2 * U, 2 * U, 2 * U, HOLSTER)
+            b(x - unit, ground - 2 * unit, 2 * unit, 2 * unit, HOLSTER)
             for i in range(tiers):
-                w = (9 - 2 * i) * U
-                y = G - 2 * U - (i + 1) * 3 * U
-                b(x - w // 2, y, w, 3 * U, "#14523a" if i % 2 else "#1f8a4c")
-                b(x - w // 2 + U, y, w - 2 * U, U, "#f4f4f4")
+                w = (9 - 2 * i) * unit
+                y = ground - 2 * unit - (i + 1) * 3 * unit
+                b(x - w // 2, y, w, 3 * unit, "#14523a" if i % 2 else "#1f8a4c")
+                b(x - w // 2 + unit, y, w - 2 * unit, unit, "#f4f4f4")
 
         for fx, tiers in ((0.04, 4), (0.09, 3), (0.30, 3), (0.70, 3), (0.93, 3), (0.97, 4)):
-            pine(int(W * fx), tiers)
+            pine(int(width * fx), tiers)
 
         def cabin(x):
-            b(x - 8 * U, G - 9 * U, 16 * U, 9 * U, HOLSTER)
-            b(x - 10 * U, G - 10 * U, 20 * U, U, PX_PURPLE)
+            b(x - 8 * unit, ground - 9 * unit, 16 * unit, 9 * unit, HOLSTER)
+            b(x - 10 * unit, ground - 10 * unit, 20 * unit, unit, PX_PURPLE)
             for k, w in enumerate((20, 16, 12)):
-                b(x - w * U // 2, G - (11 + k) * U, w * U, U, "#f4f4f4")
-            b(x - U, G - 5 * U, 2 * U, 5 * U, "#3b2a1a")
-            b(x + 3 * U, G - 7 * U, 3 * U, 3 * U, PX_YELLOW)
-            b(x + 4 * U, G - 14 * U, 2 * U, 3 * U, PX_SLATE)
+                b(x - w * unit // 2, ground - (11 + k) * unit, w * unit, unit, "#f4f4f4")
+            b(x - unit, ground - 5 * unit, 2 * unit, 5 * unit, "#3b2a1a")
+            b(x + 3 * unit, ground - 7 * unit, 3 * unit, 3 * unit, PX_YELLOW)
+            b(x + 4 * unit, ground - 14 * unit, 2 * unit, 3 * unit, PX_SLATE)
 
-        self.anchors["cabins"] = [int(W * 0.15), int(W * 0.86)]
+        self.anchors["cabins"] = [int(width * 0.15), int(width * 0.86)]
         for cx in self.anchors["cabins"]:
             cabin(cx)
 
     def _scenery_cave(self, b, pal, rnd):
-        U, W, G = self.U, self.W, self.ground
+        unit, width, ground = self.U, self.width, self.ground
         stone = mix(pal["sky"][2], "#ffffff", 0.07)
-        for _ in range(140):                                        # rock texture
-            b(rnd.randrange(0, W) // U * U, rnd.randrange(0, max(U, G - 6 * U)) // U * U,
-              rnd.choice((2, 3, 4)) * U, U, stone)
-        for _ in range(16):                                         # ores in the wall
-            ox = rnd.randrange(0, W) // U * U
-            oy = rnd.randrange(int(G * 0.3), max(int(G * 0.3) + U, G - 8 * U)) // U * U
+        for _ in range(140):  # rock texture
+            b(rnd.randrange(0, width) // unit * unit, rnd.randrange(0, max(unit, ground - 6 * unit)) // unit * unit,
+              rnd.choice((2, 3, 4)) * unit, unit, stone)
+        for _ in range(16):  # ores in the wall
+            ox = rnd.randrange(0, width) // unit * unit
+            oy = rnd.randrange(int(ground * 0.3), max(int(ground * 0.3) + unit, ground - 8 * unit)) // unit * unit
             col = rnd.choice((PX_YELLOW, "#73eff7", "#e43b44"))
-            b(ox, oy, 2 * U, 2 * U, col)
-            b(ox + U, oy + U, U, U, mix(col, "#ffffff", 0.5))
-        for _ in range(12):                                         # stalactites
-            sx = rnd.randrange(0, W) // U * U
+            b(ox, oy, 2 * unit, 2 * unit, col)
+            b(ox + unit, oy + unit, unit, unit, mix(col, "#ffffff", 0.5))
+        for _ in range(12):  # stalactites
+            sx = rnd.randrange(0, width) // unit * unit
             for i in range(rnd.randrange(3, 7)):
-                w = max(1, 8 - 2 * i) * U
-                b(sx - w // 2, i * 2 * U, w, 2 * U, mix(pal["sky"][3], "#ffffff", 0.05))
-        for fx in (0.05, 0.12, 0.88, 0.95):                         # stalagmites
-            sx = int(W * fx)
+                w = max(1, 8 - 2 * i) * unit
+                b(sx - w // 2, i * 2 * unit, w, 2 * unit, mix(pal["sky"][3], "#ffffff", 0.05))
+        for fx in (0.05, 0.12, 0.88, 0.95):  # stalagmites
+            sx = int(width * fx)
             for i in range(rnd.randrange(3, 5)):
-                w = max(1, 7 - 2 * i) * U
-                b(sx - w // 2, G - (i + 1) * 2 * U, w, 2 * U, mix(pal["sky"][4], "#ffffff", 0.08))
-        self.anchors["torches"] = [(int(W * 0.10), G - 18 * U), (int(W * 0.90), G - 18 * U)]
-        for tx, ty in self.anchors["torches"]:                      # torch holders
-            b(tx - U, ty, 2 * U, 6 * U, HOLSTER)
-            b(tx - 2 * U, ty + 4 * U, 4 * U, U, PX_SLATE)
+                w = max(1, 7 - 2 * i) * unit
+                b(sx - w // 2, ground - (i + 1) * 2 * unit, w, 2 * unit, mix(pal["sky"][4], "#ffffff", 0.08))
+        self.anchors["torches"] = [(int(width * 0.10), ground - 18 * unit), (int(width * 0.90), ground - 18 * unit)]
+        for tx, ty in self.anchors["torches"]:  # torch holders
+            b(tx - unit, ty, 2 * unit, 6 * unit, HOLSTER)
+            b(tx - 2 * unit, ty + 4 * unit, 4 * unit, unit, PX_SLATE)
 
-    def _scenery_space(self, b, pal, rnd):
-        U, W, G = self.U, self.W, self.ground
+    def _scenery_space(self, b, _pal, rnd):
+        unit, width, ground = self.U, self.width, self.ground
 
         def dome(cx, r):
             for i in range(r):
-                w = int((r * r - (r - 1 - i) ** 2) ** 0.5 * 2) * U // 2
-                b(cx - w, G - (r - i) * U, w * 2, U, "#333c57")
+                w = int((r * r - (r - 1 - i) ** 2) ** 0.5 * 2) * unit // 2
+                b(cx - w, ground - (r - i) * unit, w * 2, unit, "#333c57")
             for _ in range(5):
-                b(cx + rnd.randrange(-r * U // 2, r * U // 2) // U * U, G - rnd.randrange(1, r) * U,
-                  U, U, PX_YELLOW)
+                b(cx + rnd.randrange(-r * unit // 2, r * unit // 2) // unit * unit, ground - rnd.randrange(1, r) * unit,
+                  unit, unit, PX_YELLOW)
 
-        dome(int(W * 0.12), 9)
-        dome(int(W * 0.90), 7)
+        dome(int(width * 0.12), 9)
+        dome(int(width * 0.90), 7)
 
         def mast(x, h):
-            b(x - U // 2, G - h * U, U, h * U, PX_SLATE)
-            b(x - 3 * U, G - h * U + 2 * U, 6 * U, U, PX_GREY)
+            b(x - unit // 2, ground - h * unit, unit, h * unit, PX_SLATE)
+            b(x - 3 * unit, ground - h * unit + 2 * unit, 6 * unit, unit, PX_GREY)
 
-        mast(int(W * 0.33), 12)
-        mast(int(W * 0.70), 10)
-        self.anchors["masts"] = [(int(W * 0.33), G - 12 * U), (int(W * 0.70), G - 10 * U)]
-        for fx in (0.45, 0.58):                                     # solar panels
-            x = int(W * fx)
-            b(x, G - 5 * U, 10 * U, 3 * U, PX_BLUE)
+        mast(int(width * 0.33), 12)
+        mast(int(width * 0.70), 10)
+        self.anchors["masts"] = [(int(width * 0.33), ground - 12 * unit), (int(width * 0.70), ground - 10 * unit)]
+        for fx in (0.45, 0.58):  # solar panels
+            x = int(width * fx)
+            b(x, ground - 5 * unit, 10 * unit, 3 * unit, PX_BLUE)
             for k in range(1, 5):
-                b(x + k * 2 * U, G - 5 * U, U // 2 + 1, 3 * U, PX_DARK)
+                b(x + k * 2 * unit, ground - 5 * unit, unit // 2 + 1, 3 * unit, PX_DARK)
 
     # ---------- clouds + ambient life ----------
     def draw_clouds(self):
-        c, U = self.canvas, self.U
-        if self.W < 100:
+        c, unit = self.canvas, self.U
+        if self.width < 100:
             return
         c.delete("cloud")
         cl = self.style["cloud"]
@@ -757,12 +765,12 @@ class PixelBackdrop:
             elif self.palette == "go":
                 cl = (mix(cl[0], "#1f9a55", 0.5), mix(cl[1], "#a7f070", 0.4))
             for fx, fy, sc in ((0.10, 0.52, 1.0), (0.55, 0.60, 1.3), (0.88, 0.46, 0.9)):
-                x = (fx * self.W + self.cloud_off) % (self.W + 160) - 80
-                y = int(self.ground * fy) // U * U
-                w = int(U * 8 * sc)
-                for rx, ry, rw, col in ((0, U, w, cl[0]), (U, 0, w - 2 * U, cl[0]),
-                                        (2 * U, -U, w // 2, cl[1])):
-                    c.create_rectangle(int(x + rx), int(y + ry), int(x + rx + rw), int(y + ry + U),
+                x = (fx * self.width + self.cloud_off) % (self.width + 160) - 80
+                y = int(self.ground * fy) // unit * unit
+                w = int(unit * 8 * sc)
+                for rx, ry, rw, col in ((0, unit, w, cl[0]), (unit, 0, w - 2 * unit, cl[0]),
+                                        (2 * unit, -unit, w // 2, cl[1])):
+                    c.create_rectangle(int(x + rx), int(y + ry), int(x + rx + rw), int(y + ry + unit),
                                        fill=col, outline="", tags="cloud")
         c.tag_lower("cloud")
         c.tag_lower("bg")
@@ -770,7 +778,7 @@ class PixelBackdrop:
     def draw_ambient(self, t):
         c = self.canvas
         c.delete("amb")
-        if self.W < 100 or not self.pts:
+        if self.width < 100 or not self.pts:
             return
         pal = self.pal()
 
@@ -778,7 +786,7 @@ class PixelBackdrop:
             c.create_rectangle(int(x), int(y), int(x + w), int(y + h), fill=col,
                                outline="", tags="amb")
 
-        for k, (x, y) in enumerate(self.pts["twinkle"]):            # twinkling stars (all arenas)
+        for k, (x, y) in enumerate(self.pts["twinkle"]):  # twinkling stars (all arenas)
             if self.style["kind"] != "cave" and math.sin(t * 1.7 + k * 1.3) > 0.55:
                 r(x, y, self.U, self.U, "#ffffff")
         getattr(self, "_amb_" + self.style["kind"])(t, r, pal)
@@ -794,17 +802,17 @@ class PixelBackdrop:
         for dx, dy in (up if frame == 0 else down):
             r(x + dx * s, y + dy * s, s, s, col)
 
-    def _amb_desert(self, t, r, pal):
-        U, W, G = self.U, self.W, self.ground
-        for i in range(3):                                          # circling vultures
+    def _amb_desert(self, t, r, _pal):
+        width, ground = self.width, self.ground
+        for i in range(3):  # circling vultures
             direction = 1 if i % 2 == 0 else -1
-            x = (i * 410 + direction * (16 + 7 * i) * t) % (W + 200) - 100
-            y = G * (0.50 + 0.06 * i) + 14 * math.sin(t * 0.8 + i * 2)
+            x = (i * 410 + direction * (16 + 7 * i) * t) % (width + 200) - 100
+            y = ground * (0.50 + 0.06 * i) + 14 * math.sin(t * 0.8 + i * 2)
             self._bird(r, x, y, int(t * 3 + i) % 2, "#1a1c2c", 4)
-        ph = (t % 26) / 9.0                                         # tumbleweed rolls by
+        ph = (t % 26) / 9.0  # tumbleweed rolls by
         if ph < 1:
-            x = -40 + (W + 80) * ph
-            y = G - 14 - abs(math.sin(t * 7)) * 12
+            x = -40 + (width + 80) * ph
+            y = ground - 14 - abs(math.sin(t * 7)) * 12
             for dy in range(-4, 5):
                 half = int(math.sqrt(16 - dy * dy))
                 if half:
@@ -815,67 +823,67 @@ class PixelBackdrop:
                 r(x - 1, y - 12, 3, 24, HOLSTER)
 
     def _amb_snow(self, t, r, pal):
-        U, W, G = self.U, self.W, self.ground
-        for k, (x0, y0, sp, amp, sz) in enumerate(self.pts["snow"]):   # snowfall
-            r((x0 + amp * math.sin(t * 0.9 + k)) % W, (y0 + sp * t) % G, sz, sz, "#f4f4f4")
-        for k in range(2):                                          # northern lights
+        unit, width, ground = self.U, self.width, self.ground
+        for k, (x0, y0, sp, amp, sz) in enumerate(self.pts["snow"]):  # snowfall
+            r((x0 + amp * math.sin(t * 0.9 + k)) % width, (y0 + sp * t) % ground, sz, sz, "#f4f4f4")
+        for k in range(2):  # northern lights
             colr = ("#73eff7", "#a7f070")[k]
-            for x in range(0, W, 16):
-                y = G * 0.12 + 16 * math.sin(x * 0.010 + t * 0.5 + k * 2.1) + k * 22
-                r(x, y, 16, 3 * U + 4 * math.sin(x * 0.02 + t), colr)
-        for idx, cx in enumerate(self.anchors.get("cabins", [])):   # smoke + glowing windows
-            r(cx + 3 * U, G - 7 * U, 3 * U, 3 * U, PX_YELLOW if int(t * 2 + idx) % 3 else PX_ORANGE)
+            for x in range(0, width, 16):
+                y = ground * 0.12 + 16 * math.sin(x * 0.010 + t * 0.5 + k * 2.1) + k * 22
+                r(x, y, 16, 3 * unit + 4 * math.sin(x * 0.02 + t), colr)
+        for idx, cx in enumerate(self.anchors.get("cabins", [])):  # smoke + glowing windows
+            r(cx + 3 * unit, ground - 7 * unit, 3 * unit, 3 * unit, PX_YELLOW if int(t * 2 + idx) % 3 else PX_ORANGE)
             for j in range(4):
                 age = (t * 0.5 + j * 0.25 + idx * 0.13) % 1
-                r(cx + 5 * U + math.sin(age * 6 + j) * 6 + age * 14, G - 14 * U - age * 70,
-                  U * (1 + age), U * (1 + age), mix("#f4f4f4", pal["sky"][4], age * 0.7))
+                r(cx + 5 * unit + math.sin(age * 6 + j) * 6 + age * 14, ground - 14 * unit - age * 70,
+                  unit * (1 + age), unit * (1 + age), mix("#f4f4f4", pal["sky"][4], age * 0.7))
 
-    def _amb_cave(self, t, r, pal):
-        U, W, G = self.U, self.W, self.ground
-        for tx, ty in self.anchors.get("torches", []):              # flickering torches + embers
+    def _amb_cave(self, t, r, _pal):
+        unit, width, ground = self.U, self.width, self.ground
+        for tx, ty in self.anchors.get("torches", []):  # flickering torches + embers
             flick = int(1.5 + 1.5 * math.sin(t * 11 + tx))
-            r(tx - 2 * U, ty - (5 + flick) * U, 4 * U, (5 + flick) * U, PX_ORANGE)
-            r(tx - U, ty - (4 + flick) * U, 2 * U, (4 + flick) * U, PX_YELLOW)
-            r(tx - U // 2, ty - 2 * U, U, U, "#ffffff")
+            r(tx - 2 * unit, ty - (5 + flick) * unit, 4 * unit, (5 + flick) * unit, PX_ORANGE)
+            r(tx - unit, ty - (4 + flick) * unit, 2 * unit, (4 + flick) * unit, PX_YELLOW)
+            r(tx - unit // 2, ty - 2 * unit, unit, unit, "#ffffff")
             for j in range(4):
                 age = (t * 0.8 + j * 0.27) % 1
-                r(tx + math.sin(j * 3 + age * 5) * 12, ty - (6 + age * 14) * U,
-                  U // 2 * 2, U // 2 * 2, PX_YELLOW if age < 0.5 else PX_ORANGE)
-        for i in range(3):                                          # bats
+                r(tx + math.sin(j * 3 + age * 5) * 12, ty - (6 + age * 14) * unit,
+                  unit // 2 * 2, unit // 2 * 2, PX_YELLOW if age < 0.5 else PX_ORANGE)
+        for i in range(3):  # bats
             direction = 1 if i % 2 == 0 else -1
-            x = (i * 380 + direction * 45 * t) % (W + 160) - 80
-            y = G * 0.50 + 40 * math.sin(t * 1.6 + i * 2)
+            x = (i * 380 + direction * 45 * t) % (width + 160) - 80
+            y = ground * 0.50 + 40 * math.sin(t * 1.6 + i * 2)
             self._bird(r, x, y, int(t * 6 + i) % 2, "#0e0f1a", 3)
             r(x - 3, y + 1, 3, 3, "#e43b44")
-        for k, (x, y) in enumerate(self.pts["fly"]):                # glow-worms
+        for k, (x, y) in enumerate(self.pts["fly"]):  # glow-worms
             if math.sin(t * 1.5 + k * 2) > -0.2:
                 r(x + 30 * math.sin(t * 0.5 + k), y + 20 * math.cos(t * 0.7 + k * 1.3), 4, 4,
                   "#a7f070" if k % 2 else "#73eff7")
 
     def _amb_space(self, t, r, pal):
-        U, W, G = self.U, self.W, self.ground
-        ph = (t % 7.5) / 0.9                                        # shooting star
+        unit, width, ground = self.U, self.width, self.ground
+        ph = (t % 7.5) / 0.9  # shooting star
         if ph < 1:
-            hx, hy = W * 0.92 - ph * W * 0.45, G * 0.22 + ph * G * 0.28
+            hx, hy = width * 0.92 - ph * width * 0.45, ground * 0.22 + ph * ground * 0.28
             for k in range(8):
-                r(hx + k * 11, hy - k * 5.5, U - k // 2, U - k // 2,
+                r(hx + k * 11, hy - k * 5.5, unit - k // 2, unit - k // 2,
                   mix("#ffffff", pal["sky"][3], k / 8.0))
-        ph = (t % 30) / 16.0                                        # a UFO drifts by
+        ph = (t % 30) / 16.0  # a UFO drifts by
         if ph < 1:
-            x = -60 + (W + 120) * ph
-            y = G * 0.46 + 12 * math.sin(t * 2)
-            r(x - 2 * U, y - 3 * U, 4 * U, U, "#73eff7")
-            r(x - 5 * U, y - 2 * U, 10 * U, 2 * U, PX_GREY)
-            r(x - 3 * U, y, 6 * U, U, PX_SLATE)
+            x = -60 + (width + 120) * ph
+            y = ground * 0.46 + 12 * math.sin(t * 2)
+            r(x - 2 * unit, y - 3 * unit, 4 * unit, unit, "#73eff7")
+            r(x - 5 * unit, y - 2 * unit, 10 * unit, 2 * unit, PX_GREY)
+            r(x - 3 * unit, y, 6 * unit, unit, PX_SLATE)
             for i in range(3):
                 if (int(t * 4) + i) % 3:
-                    r(x - 4 * U + i * 4 * U, y - 2 * U + U // 2, U, U, PX_YELLOW)
-        for i in range(int(W // (14 * U)) + 1):                     # blinking deck lights
+                    r(x - 4 * unit + i * 4 * unit, y - 2 * unit + unit // 2, unit, unit, PX_YELLOW)
+        for i in range(int(width // (14 * unit)) + 1):  # blinking deck lights
             if (i + int(t * 2)) % 3 == 0:
-                r(i * 14 * U + 3 * U, G - U, U, U, PX_YELLOW)
+                r(i * 14 * unit + 3 * unit, ground - unit, unit, unit, PX_YELLOW)
         for mx, my in self.anchors.get("masts", []):
             if int(t * 1.5) % 2 == 0:
-                r(mx - U // 2, my - 2 * U, U, U, "#e43b44")
+                r(mx - unit // 2, my - 2 * unit, unit, unit, "#e43b44")
 
     def loop(self):
         self.job = None
@@ -912,44 +920,44 @@ class DuelArena:
     slowed down, frozen for hit-stop, or skipped without any special cases.
     """
 
-    U = 5                          # the size of one "pixel"
-    GROUND = 0                     # the scene uses LOCAL coordinates: (0, 0) is the point
-    FIG_X = (-230, 230)            # on the ground under the middle of the window
-    FACING = (1, -1)               # +1 = faces right, -1 = faces left
-    MUZZLE = (14, -15)             # gun muzzle offset in pixels (x forward, y up)
-    TORSO_FRONT = 5                # how far in front of center bullets hit
-    BULLET_V = 0.30                # px per animation-ms (the "slow-mo" speed)
-    KNOCK = 30                     # px the loser is knocked back
-    FREEZE_MS = 190                # hit-stop length
+    U = 5  # the size of one "pixel"
+    GROUND = 0  # the scene uses LOCAL coordinates: (0, 0) is the point
+    FIG_X = (-230, 230)  # on the ground under the middle of the window
+    FACING = (1, -1)  # +1 = faces right, -1 = faces left
+    MUZZLE = (14, -15)  # gun muzzle offset in pixels (x forward, y up)
+    TORSO_FRONT = 5  # how far in front of center bullets hit
+    BULLET_V = 0.30  # px per animation-ms (the "slow-mo" speed)
+    KNOCK = 30  # px the loser is knocked back
+    FREEZE_MS = 190  # hit-stop length
 
     def __init__(self, backdrop, outfits, sfx=None, shake=None):
-        self.bd = backdrop                  # the full-window PixelBackdrop we draw onto
+        self.bd = backdrop  # the full-window PixelBackdrop we draw onto
         self.canvas = backdrop.canvas
-        self.outfits = outfits              # [{hat, color, face}, {hat, color, face}]
+        self.outfits = outfits  # [{hat, color, face}, {hat, color, face}]
         self.sfx = sfx or (lambda name: None)
         self.shake = shake or (lambda strength, steps: None)
-        self.mode = "static"        # static | duel | void | stopped
-        self.plan = None
+        self.mode = "static"  # static | duel | void | stopped
+        self.plan: dict[str, Any] = {}
         self.plan_key = None
-        self.text = None            # (text, color, scale, top)
-        self.banner = None          # e.g. "MATCH POINT!" (flashes above the scene)
-        self.tr = None              # trainer-scene state
+        self.text = None  # (text, color, scale, top)
+        self.banner = None  # e.g. "MATCH POINT!" (flashes above the scene)
+        self.tr: dict[str, Any] = {}  # trainer-scene state
         self.t = 0.0
         self.speed = 1.0
         self.freeze = 0.0
         self.flash_left = 0.0
         self.hit_done = False
         self.ev_i = 0
-        self.done_cb = None
+        self.done_cb: Optional[Callable[[], None]] = None
         self.last = time.perf_counter()
-        self.job = None
+        self.job: Optional[str] = None
         backdrop.on_change = self.redraw
         self.redraw()
         self.job = self.canvas.after(100, self.loop)
 
     @property
     def cx(self):
-        return self.bd.W // 2
+        return self.bd.width // 2
 
     @property
     def gy(self):
@@ -991,19 +999,25 @@ class DuelArena:
         parts = []
         add = lambda x, y, w, h, c: parts.append((x, y, w, h, c))
 
-        if pose == "hit":                       # arms flung up
-            add(-6, -21, 2, 6, vest); add(-6, -23, 2, 2, SKIN)
+        if pose == "hit":  # arms flung up
+            add(-6, -21, 2, 6, vest);
+            add(-6, -23, 2, 2, SKIN)
         else:
-            add(-6, -15, 2, 6, vest); add(-6, -9, 2, 2, SKIN)
-        add(-3, -9, 3, 7, PX_BLUE); add(1, -9, 3, 7, PX_BLUE)        # legs
-        add(-4, -2, 4, 2, BOOT); add(1, -2, 5, 2, BOOT)              # boots
-        add(-4, -16, 8, 7, vest); add(-1, -16, 2, 7, PX_WHITE)       # torso + shirt
-        add(-4, -10, 8, 1, BOOT); add(0, -10, 1, 1, PX_YELLOW)       # belt + buckle
+            add(-6, -15, 2, 6, vest);
+            add(-6, -9, 2, 2, SKIN)
+        add(-3, -9, 3, 7, PX_BLUE);
+        add(1, -9, 3, 7, PX_BLUE)  # legs
+        add(-4, -2, 4, 2, BOOT);
+        add(1, -2, 5, 2, BOOT)  # boots
+        add(-4, -16, 8, 7, vest);
+        add(-1, -16, 2, 7, PX_WHITE)  # torso + shirt
+        add(-4, -10, 8, 1, BOOT);
+        add(0, -10, 1, 1, PX_YELLOW)  # belt + buckle
         if pose in ("ready", "aim", "aim_up"):
             add(2, -10, 3, 3, HOLSTER)
             if pose == "ready":
                 add(3, -11, 2, 1, PX_GREY)
-        add(-3, -20, 6, 3, SKIN)                                     # head
+        add(-3, -20, 6, 3, SKIN)  # head
         if closed_eyes:
             add(0, -19, 3, 1, PX_DARK)
         else:
@@ -1013,22 +1027,29 @@ class DuelArena:
         elif face == "Shades":
             add(-1, -19, 4, 1, PX_DARK)
         elif face == "Eyepatch":
-            add(0, -19, 2, 2, PX_DARK); add(-3, -20, 3, 1, PX_DARK)
-        add(-3, -17, 6, 1, PX_RED)                                   # neckerchief
-        if hat_style == "Bandana" or hat_on:                         # a bandana never flies off
+            add(0, -19, 2, 2, PX_DARK);
+            add(-3, -20, 3, 1, PX_DARK)
+        add(-3, -17, 6, 1, PX_RED)  # neckerchief
+        if hat_style == "Bandana" or hat_on:  # a bandana never flies off
             for part in self.hat_parts(hat_style, col):
                 add(*part)
 
         if pose == "ready":
-            add(4, -15, 2, 5, vest); add(4, -10, 2, 2, SKIN)
+            add(4, -15, 2, 5, vest);
+            add(4, -10, 2, 2, SKIN)
         elif pose == "aim":
-            add(4, -15, 3, 2, vest); add(7, -15, 2, 2, SKIN)
-            add(9, -16, 5, 2, PX_GREY); add(9, -14, 2, 2, PX_SLATE)
+            add(4, -15, 3, 2, vest);
+            add(7, -15, 2, 2, SKIN)
+            add(9, -16, 5, 2, PX_GREY);
+            add(9, -14, 2, 2, PX_SLATE)
         elif pose == "aim_up":
-            add(5, -21, 2, 6, vest); add(5, -23, 2, 2, SKIN)
-            add(5, -28, 2, 5, PX_GREY); add(7, -25, 2, 2, PX_SLATE)
+            add(5, -21, 2, 6, vest);
+            add(5, -23, 2, 2, SKIN)
+            add(5, -28, 2, 5, PX_GREY);
+            add(7, -25, 2, 2, PX_SLATE)
         elif pose == "hit":
-            add(4, -21, 2, 6, vest); add(4, -23, 2, 2, SKIN)
+            add(4, -21, 2, 6, vest);
+            add(4, -23, 2, 2, SKIN)
         return parts
 
     @staticmethod
@@ -1045,7 +1066,7 @@ class DuelArena:
             return [(-3, -23, 6, 3, col), (2, -21, 6, 1, hat_d)]
         if style == "Bandana":
             return [(-3, -20, 6, 1, col), (-5, -20, 2, 3, col)]
-        return [(-6, -21, 12, 1, hat_d), (-3, -24, 6, 3, col), (-3, -22, 6, 1, hat_d)]   # Cowboy
+        return [(-6, -21, 12, 1, hat_d), (-3, -24, 6, 3, col), (-3, -22, 6, 1, hat_d)]  # Cowboy
 
     def hat_sprite(self, idx):
         """The hat alone, with its bottom edge at y = 0 (used when it flies off)."""
@@ -1073,12 +1094,12 @@ class DuelArena:
         return [(px, py - bottom, pw, ph, c) for px, py, pw, ph, c in out]
 
     def draw_figure(self, parts, ox, oy, facing, flash=False):
-        U = self.U
+        unit = self.U
 
         def pr(x, y, w, h, color):
             if facing < 0:
                 x = -(x + w)
-            self.rect(ox + x * U, oy + y * U, w * U, h * U, color)
+            self.rect(ox + x * unit, oy + y * unit, w * unit, h * unit, color)
 
         for x, y, w, h, _c in parts:
             pr(x - 1, y - 1, w + 2, h + 2, PX_DARK)
@@ -1087,35 +1108,35 @@ class DuelArena:
 
     # ---------- effects ----------
     def draw_star(self, cx, cy, r):
-        U = self.U
-        r = max(U, int(r))
-        self.rect(cx - 2 * r, cy - U / 2, 4 * r, U, PX_YELLOW)
-        self.rect(cx - U / 2, cy - 2 * r, U, 4 * r, PX_YELLOW)
+        unit = self.U
+        r = max(unit, int(r))
+        self.rect(cx - 2 * r, cy - unit / 2, 4 * r, unit, PX_YELLOW)
+        self.rect(cx - unit / 2, cy - 2 * r, unit, 4 * r, PX_YELLOW)
         d = int(r * 1.3)
         for sx in (-1, 1):
             for sy in (-1, 1):
-                self.rect(cx + sx * d - U * 0.75, cy + sy * d - U * 0.75, U * 1.5, U * 1.5, PX_ORANGE)
+                self.rect(cx + sx * d - unit * 0.75, cy + sy * d - unit * 0.75, unit * 1.5, unit * 1.5, PX_ORANGE)
         self.rect(cx - r, cy - r, 2 * r, 2 * r, PX_WHITE)
 
     def draw_bullet(self, bx, by, f, vertical=False):
-        U = self.U
+        unit = self.U
         if vertical:
             for k, col in enumerate((PX_YELLOW, PX_ORANGE, PX_RED)):
-                self.rect(bx - (U - 1 - k) / 2, by + 1.5 * U + k * 3 * U, U - 1 - k, 3 * U, col)
-            self.rect(bx - U / 2, by - 1.5 * U, U, 3 * U, PX_WHITE)
+                self.rect(bx - (unit - 1 - k) / 2, by + 1.5 * unit + k * 3 * unit, unit - 1 - k, 3 * unit, col)
+            self.rect(bx - unit / 2, by - 1.5 * unit, unit, 3 * unit, PX_WHITE)
             return
         for k, col in enumerate((PX_YELLOW, PX_ORANGE, PX_RED)):
-            h = U - 1 - k
+            h = unit - 1 - k
             if f > 0:
-                x0 = bx - 1.5 * U - (k + 1) * 3 * U
+                x0 = bx - 1.5 * unit - (k + 1) * 3 * unit
             else:
-                x0 = bx + 1.5 * U + k * 3 * U
-            self.rect(x0, by - h / 2, 3 * U, h, col)
-        self.rect(bx - 1.5 * U, by - U / 2, 3 * U, U, PX_WHITE)
+                x0 = bx + 1.5 * unit + k * 3 * unit
+            self.rect(x0, by - h / 2, 3 * unit, h, col)
+        self.rect(bx - 1.5 * unit, by - unit / 2, 3 * unit, unit, PX_WHITE)
 
     def draw_tumbleweed(self, t):
         s = 3
-        cx = -self.cx - 40 + (self.bd.W + 80) * (t / 2800.0)
+        cx = -self.cx - 40 + (self.bd.width + 80) * (t / 2800.0)
         cy = self.GROUND - 22 - abs(math.sin(t / 160.0)) * 14
         for dy in range(-6, 7):
             half = int(math.sqrt(36 - dy * dy))
@@ -1131,25 +1152,25 @@ class DuelArena:
                 self.rect(cx + k * s - s / 2, cy - k * s - s / 2, s, s, dark)
 
     # ---------- the showdown "script" ----------
-    def make_plan(self, W, L, delta_ms, early):
+    def make_plan(self, winner, loser, delta_ms, early):
         """Plan a duel in animation-ms. W = winner, L = loser."""
-        U, G = self.U, self.GROUND
-        mx = [self.FIG_X[i] + self.FACING[i] * self.MUZZLE[0] * U for i in (0, 1)]
-        my = G + self.MUZZLE[1] * U
-        hit_x = self.FIG_X[L] + self.FACING[L] * self.TORSO_FRONT * U
-        flight = abs(hit_x - mx[W]) / self.BULLET_V
-        fire = {W: 1500.0 if early else 500.0}
+        unit, ground = self.U, self.GROUND
+        mx = [self.FIG_X[i] + self.FACING[i] * self.MUZZLE[0] * unit for i in (0, 1)]
+        my = ground + self.MUZZLE[1] * unit
+        hit_x = self.FIG_X[loser] + self.FACING[loser] * self.TORSO_FRONT * unit
+        flight = abs(hit_x - mx[winner]) / self.BULLET_V
+        fire = {winner: 1500.0 if early else 500.0}
         up = None
-        if early:                           # false starter fires at the sky
-            up = {"i": L, "t": 350.0}
-        elif delta_ms is not None:          # loser pulled the trigger too, just later
+        if early:  # false starter fires at the sky
+            up = {"i": loser, "t": 350.0}
+        elif delta_ms is not None:  # loser pulled the trigger too, just later
             gap = clamp(250.0 + delta_ms * 5.0, 250.0, 0.85 * flight)
-            fire[L] = fire[W] + gap
-        hit_t = fire[W] + flight
+            fire[loser] = fire[winner] + gap
+        hit_t = fire[winner] + flight
         events = [(ft, "go") for ft in fire.values()]
         if up:
             events.append((up["t"], "go"))
-        plan = dict(W=W, L=L, fire=fire, up=up, mx=mx, my=my, hit_x=hit_x,
+        plan = dict(W=winner, L=loser, fire=fire, up=up, mx=mx, my=my, hit_x=hit_x,
                     flight=flight, hit_t=hit_t, end_t=hit_t + 1700.0,
                     events=sorted(events))
         plan["particles"] = self.build_particles(plan)
@@ -1160,17 +1181,17 @@ class DuelArena:
         return (self.FIG_X[i] + self.FACING[i] * 6 * self.U, self.GROUND - 28 * self.U)
 
     def build_particles(self, plan):
-        U, G = self.U, self.GROUND
-        W, L = plan["W"], plan["L"]
+        unit, ground = self.U, self.GROUND
+        winner, loser = plan["W"], plan["L"]
         rnd = random.random
-        P = []
+        particles = []
 
         def smoke(x, y, t0, f):
             for k in range(6):
-                P.append(dict(t0=t0 + k * 70, x=x, y=y, vx=f * (0.005 + rnd() * 0.025),
-                              vy=-(0.02 + rnd() * 0.03), g=0.0, life=1800.0, s0=U * 1.2,
-                              s1=U * 3.0, color=random.choice((PX_GREY, PX_WHITE, PX_SLATE)),
-                              kind="smoke"))
+                particles.append(dict(t0=t0 + k * 70, x=x, y=y, vx=f * (0.005 + rnd() * 0.025),
+                                      vy=-(0.02 + rnd() * 0.03), g=0.0, life=1800.0, s0=unit * 1.2,
+                                      s1=unit * 3.0, color=random.choice((PX_GREY, PX_WHITE, PX_SLATE)),
+                                      kind="smoke"))
 
         for i, ft in plan["fire"].items():
             smoke(plan["mx"][i], plan["my"], ft, self.FACING[i])
@@ -1178,59 +1199,61 @@ class DuelArena:
             ux, uy = self.up_muzzle(plan)
             smoke(ux, uy, plan["up"]["t"], 0)
 
-        d = self.FACING[W]
-        for _ in range(24):                 # impact sparks
+        d = self.FACING[winner]
+        for _ in range(24):  # impact sparks
             back = -d if rnd() < 0.8 else d
-            P.append(dict(t0=plan["hit_t"], x=plan["hit_x"], y=plan["my"],
-                          vx=back * (0.1 + rnd() * 0.7), vy=-(0.1 + rnd() * 0.7), g=0.0016,
-                          life=600 + rnd() * 300,
-                          s0=random.choice((U, U, U * 0.6, U * 1.4)), s1=U * 0.4,
-                          color=random.choice((PX_YELLOW, PX_WHITE, PX_ORANGE, PX_YELLOW)),
-                          kind="spark"))
-        if L in plan["fire"]:               # the loser's bullet fizzles out
-            bx = plan["mx"][L] + self.FACING[L] * self.BULLET_V * (plan["hit_t"] - plan["fire"][L])
+            particles.append(dict(t0=plan["hit_t"], x=plan["hit_x"], y=plan["my"],
+                                  vx=back * (0.1 + rnd() * 0.7), vy=-(0.1 + rnd() * 0.7), g=0.0016,
+                                  life=600 + rnd() * 300,
+                                  s0=random.choice((unit, unit, unit * 0.6, unit * 1.4)), s1=unit * 0.4,
+                                  color=random.choice((PX_YELLOW, PX_WHITE, PX_ORANGE, PX_YELLOW)),
+                                  kind="spark"))
+        if loser in plan["fire"]:  # the loser's bullet fizzles out
+            bx = plan["mx"][loser] + self.FACING[loser] * self.BULLET_V * (plan["hit_t"] - plan["fire"][loser])
             for _ in range(8):
-                P.append(dict(t0=plan["hit_t"], x=bx, y=plan["my"], vx=(rnd() - 0.5) * 0.4,
-                              vy=-rnd() * 0.3, g=0.001, life=420, s0=U * 0.8, s1=U * 0.3,
-                              color=random.choice((PX_YELLOW, PX_GREY)), kind="spark"))
-        origin = self.FIG_X[L] - self.FACING[L] * self.KNOCK
-        for _ in range(12):                 # dust when the loser hits the ground
-            P.append(dict(t0=plan["hit_t"] + 320, x=origin - self.FACING[L] * rnd() * 70,
-                          y=G - U, vx=(rnd() - 0.5) * 0.35, vy=-(0.03 + rnd() * 0.09),
-                          g=0.0003, life=520, s0=U * 1.6, s1=U * 0.5,
-                          color=random.choice((PX_YELLOW, PX_ORANGE)), kind="dust"))
-        return P
+                particles.append(dict(t0=plan["hit_t"], x=bx, y=plan["my"], vx=(rnd() - 0.5) * 0.4,
+                                      vy=-rnd() * 0.3, g=0.001, life=420, s0=unit * 0.8, s1=unit * 0.3,
+                                      color=random.choice((PX_YELLOW, PX_GREY)), kind="spark"))
+        origin = self.FIG_X[loser] - self.FACING[loser] * self.KNOCK
+        for _ in range(12):  # dust when the loser hits the ground
+            particles.append(dict(t0=plan["hit_t"] + 320, x=origin - self.FACING[loser] * rnd() * 70,
+                                  y=ground - unit, vx=(rnd() - 0.5) * 0.35, vy=-(0.03 + rnd() * 0.09),
+                                  g=0.0003, life=520, s0=unit * 1.6, s1=unit * 0.5,
+                                  color=random.choice((PX_YELLOW, PX_ORANGE)), kind="dust"))
+        return particles
 
-    def hat_state(self, L, age):
+    def hat_state(self, loser, age):
         """Where the loser's flying hat is, `age` ms after the hit."""
         if age < 0:
             return None
-        U, G = self.U, self.GROUND
-        f = self.FACING[L]
-        x0, y0 = self.FIG_X[L] - f * 3 * U, G - 20 * U
+        unit, ground = self.U, self.GROUND
+        f = self.FACING[loser]
+        x0, y0 = self.FIG_X[loser] - f * 3 * unit, ground - 20 * unit
         vx, vy, g = -f * 0.13, -0.50, 0.0016
-        a1 = (-vy + math.sqrt(vy * vy - 2 * g * (y0 - G))) / g      # first landing
-        vb = -0.30 * (vy + g * a1)                                    # one small bounce
+        a1 = (-vy + math.sqrt(vy * vy - 2 * g * (y0 - ground))) / g  # first landing
+        vb = -0.30 * (vy + g * a1)  # one small bounce
         a2 = 2 * abs(vb) / g
         if age <= a1:
             return x0 + vx * age, y0 + vy * age + 0.5 * g * age * age
         if age <= a1 + a2:
             b = age - a1
-            return x0 + vx * age, G + vb * b + 0.5 * g * b * b
-        return x0 + vx * (a1 + a2), G
+            return x0 + vx * age, ground + vb * b + 0.5 * g * b * b
+        return x0 + vx * (a1 + a2), ground
 
     def draw_plan(self, t, animated):
         p = self.plan
-        U, G = self.U, self.GROUND
-        W, L = p["W"], p["L"]
+        unit, ground = self.U, self.GROUND
+        winner, loser = p["W"], p["L"]
         post = t - p["hit_t"]
 
         for i in (0, 1):
-            f, fx, oy, ox = self.FACING[i], self.FIG_X[i], G, self.FIG_X[i]
+            f, fx = self.FACING[i], self.FIG_X[i]
+            ox: float = fx
+            oy: float = ground
             pose, hat_on, flash, lean, lying = "ready", True, False, 0, False
             ft = p["fire"].get(i)
             up = p["up"]
-            if i == L and post >= 0:
+            if i == loser and post >= 0:
                 hat_on = False
                 lean = -2 - 6 * ease(min(post, 300.0) / 300.0)
                 ox = fx - f * self.KNOCK * ease(min(post, 500.0) / 500.0)
@@ -1241,35 +1264,35 @@ class DuelArena:
                     lying = True
                     b = post - 320
                     if b < 300:
-                        oy = G - U * 2 * abs(math.sin(math.pi * b / 300.0))
+                        oy = ground - unit * 2 * abs(math.sin(math.pi * b / 300.0))
             else:
                 if up and up["i"] == i and t >= up["t"] - 150:
                     pose = "aim_up"
                 elif ft is not None and t >= ft - 150:
                     pose = "aim"
-                if ft is not None and 0 <= t - ft < 160:            # recoil kick
-                    ox = fx - f * 2 * U * (1 - (t - ft) / 160.0)
-                if i == W and 650 <= post < 1100:                   # victory hop
-                    oy = G - 3 * U * math.sin(math.pi * (post - 650) / 450.0)
-            parts = self.parts_for(i, pose, hat_on, closed_eyes=(i == L and post >= 0))
+                if ft is not None and 0 <= t - ft < 160:  # recoil kick
+                    ox = fx - f * 2 * unit * (1 - (t - ft) / 160.0)
+                if i == winner and 650 <= post < 1100:  # victory hop
+                    oy = ground - 3 * unit * math.sin(math.pi * (post - 650) / 450.0)
+            parts = self.parts_for(i, pose, hat_on, closed_eyes=(i == loser and post >= 0))
             if lying:
                 parts = self.rotate_down(parts)
             elif lean:
                 parts = self.apply_lean(parts, lean)
             if not lying:
-                self.rect(ox - 6 * U, G, 12 * U, U, PX_PURPLE)       # shadow
+                self.rect(ox - 6 * unit, ground, 12 * unit, unit, PX_PURPLE)  # shadow
             self.draw_figure(parts, ox, oy, f, flash)
 
-        if post >= 0:                                               # the flying hat
-            pos = self.hat_state(L, post)
-            sprite = self.hat_sprite(L)
-            if sprite:
+        if post >= 0:  # the flying hat
+            pos = self.hat_state(loser, post)
+            sprite = self.hat_sprite(loser)
+            if sprite and pos is not None:
                 self.draw_figure(sprite, pos[0], pos[1], 1)
 
         if not animated:
             return
 
-        for q in p["particles"]:                                    # sparks, smoke, dust
+        for q in p["particles"]:  # sparks, smoke, dust
             age = t - q["t0"]
             if 0 <= age < q["life"]:
                 k = age / q["life"]
@@ -1277,36 +1300,36 @@ class DuelArena:
                 x = q["x"] + q["vx"] * age
                 y = q["y"] + q["vy"] * age + 0.5 * q["g"] * age * age
                 if q["kind"] == "spark":
-                    y = min(y, G - size)
+                    y = min(y, ground - size)
                 self.rect(x - size / 2, y - size / 2, size, size, q["color"])
 
         my = p["my"]
-        for i, ft in p["fire"].items():                             # bullets + muzzle flash
+        for i, ft in p["fire"].items():  # bullets + muzzle flash
             f = self.FACING[i]
             if ft <= t < p["hit_t"]:
                 self.draw_bullet(p["mx"][i] + f * self.BULLET_V * (t - ft), my, f)
             if 0 <= t - ft < 110:
-                self.draw_star(p["mx"][i] + f * 2 * U, my, U * (1.2 + 0.8 * (1 - (t - ft) / 110.0)))
+                self.draw_star(p["mx"][i] + f * 2 * unit, my, unit * (1.2 + 0.8 * (1 - (t - ft) / 110.0)))
         if p["up"]:
             ux, uy = self.up_muzzle(p)
             ut = p["up"]["t"]
             if ut <= t < p["hit_t"]:
                 self.draw_bullet(ux, uy - 0.4 * (t - ut), 0, vertical=True)
             if 0 <= t - ut < 110:
-                self.draw_star(ux, uy - 2 * U, U * 1.4)
+                self.draw_star(ux, uy - 2 * unit, unit * 1.4)
 
-        if 0 <= post < 240:                                         # impact star
-            self.draw_star(p["hit_x"], my, U * (2 + 4 * ease(post / 240.0)))
+        if 0 <= post < 240:  # impact star
+            self.draw_star(p["hit_x"], my, unit * (2 + 4 * ease(post / 240.0)))
 
         cx = 0
         if post < 0:
-            if p["up"] and p["up"]["t"] <= t < p["fire"][W]:
+            if p["up"] and p["up"]["t"] <= t < p["fire"][winner]:
                 self.draw_text("FOUL!", cx, -140, 7, PX_ORANGE)
             elif t > 200:
                 self.draw_text("SLOW-MO", cx, -140, 6, PX_WHITE)
         else:
-            if post < 900:                                          # floating "HIT!"
-                self.draw_text("HIT!", self.FIG_X[L], G - 31 * U - 0.03 * post, 5, PX_YELLOW)
+            if post < 900:  # floating "HIT!"
+                self.draw_text("HIT!", self.FIG_X[loser], ground - 31 * unit - 0.03 * post, 5, PX_YELLOW)
             if post >= 400:
                 self.draw_text("KO!", cx, -140, 8, PX_YELLOW)
 
@@ -1318,11 +1341,11 @@ class DuelArena:
     def redraw(self):
         self.canvas.delete("dyn")
         if self.flash_left > 0:
-            self.canvas.create_rectangle(0, 0, self.bd.W, self.gy, fill="#ffffff",
+            self.canvas.create_rectangle(0, 0, self.bd.width, self.gy, fill="#ffffff",
                                          outline="", tags="dyn")
         if self.mode == "trainer":
             self.draw_trainer()
-        elif self.plan is not None:
+        elif self.plan:
             self.draw_plan(self.t if self.mode == "duel" else 1e9, self.mode == "duel")
         else:
             self.draw_ready()
@@ -1333,13 +1356,13 @@ class DuelArena:
         if self.text:
             txt, color, scale, top = self.text
             self.draw_text(txt, 0, (top - self.gy) if top is not None else -140, scale, color)
-        if self.banner and self.mode == "static":                    # flashing MATCH POINT!
+        if self.banner and self.mode == "static":  # flashing MATCH POINT!
             flash = PX_YELLOW if int(time.perf_counter() * 2.5) % 2 == 0 else PX_ORANGE
             self.draw_text(self.banner, 0, -205, 4, flash)
 
     # ---------- trainer scene: one gunslinger and a pop-up target ----------
     TARGET_X = 210
-    TRAIN_BULLET_V = 1.6            # px per ms (real time: drills are fast, no slow-mo)
+    TRAIN_BULLET_V = 1.6  # px per ms (real time: drills are fast, no slow-mo)
 
     @staticmethod
     def _now():
@@ -1347,7 +1370,7 @@ class DuelArena:
 
     def trainer_begin(self):
         self.mode = "trainer"
-        self.plan, self.plan_key, self.text, self.banner = None, None, None, None
+        self.plan, self.plan_key, self.text, self.banner = {}, None, None, None
         self.tr = dict(target="hidden", t0=0.0, shot=None, parts=[])
         self.redraw()
 
@@ -1359,17 +1382,17 @@ class DuelArena:
 
     def trainer_shoot(self, hit):
         """Fire at the target (hit=True) or into the sky because it was too early."""
-        U = self.U
+        unit = self.U
         now = self._now()
         if hit:
-            mx = self.FIG_X[0] + self.MUZZLE[0] * U
-            t_hit = now + ((self.TARGET_X - 6 * U) - mx) / self.TRAIN_BULLET_V
+            mx = self.FIG_X[0] + self.MUZZLE[0] * unit
+            t_hit = now + ((self.TARGET_X - 6 * unit) - mx) / self.TRAIN_BULLET_V
             parts = []
-            for _ in range(20):                                      # wood chips + sparks
-                parts.append(dict(t0=t_hit, x=self.TARGET_X - 6 * U, y=self.MUZZLE[1] * U,
+            for _ in range(20):  # wood chips + sparks
+                parts.append(dict(t0=t_hit, x=self.TARGET_X - 6 * unit, y=self.MUZZLE[1] * unit,
                                   vx=-(0.05 + random.random() * 0.5), vy=-(0.1 + random.random() * 0.6),
                                   g=0.0016, life=500 + random.random() * 300,
-                                  s0=random.choice((U, U * 0.6, U * 1.2)), s1=U * 0.4,
+                                  s0=random.choice((unit, unit * 0.6, unit * 1.2)), s1=unit * 0.4,
                                   color=random.choice(("#d9a066", HOLSTER, PX_WHITE, PX_YELLOW, PX_RED)),
                                   kind="spark"))
             self.tr.update(shot=dict(t0=now, hit=True, t_hit=t_hit), parts=parts)
@@ -1382,7 +1405,7 @@ class DuelArena:
     def trainer_text(self, text, color=PX_WHITE, scale=7):
         self.text = (text, color, scale, None) if text else None
 
-    def crect(self, x, y, w, h, color):
+    def clipped_rect(self, x, y, w, h, color):
         """Rectangle clipped at the ground line (so the target emerges from the ground)."""
         if y >= 0:
             return
@@ -1391,7 +1414,7 @@ class DuelArena:
         self.rect(x, y, w, h, color)
 
     def draw_trainer(self):
-        U = self.U
+        unit = self.U
         tr = self.tr or {}
         now = self._now()
         shot = tr.get("shot")
@@ -1401,50 +1424,50 @@ class DuelArena:
             if age < 700:
                 pose = "aim" if shot["hit"] else "aim_up"
             if age < 160:
-                ox -= 2 * U * (1 - age / 160.0)
-        self.rect(ox - 6 * U, 0, 12 * U, U, PX_PURPLE)
+                ox -= 2 * unit * (1 - age / 160.0)
+        self.rect(ox - 6 * unit, 0, 12 * unit, unit, PX_PURPLE)
         self.draw_figure(self.parts_for(0, pose), ox, 0, 1)
 
-        state = tr.get("target", "hidden")                           # the target
+        state = tr.get("target", "hidden")  # the target
         drop = None
         if state == "up":
-            drop = 22 * U * (1 - ease((now - tr["t0"]) / 140.0))
+            drop = 22 * unit * (1 - ease((now - tr["t0"]) / 140.0))
         elif state == "sinking":
-            drop = 22 * U * ease((now - tr["t0"]) / 260.0)
-        if drop is not None and drop < 22 * U:
+            drop = 22 * unit * ease((now - tr["t0"]) / 260.0)
+        if drop is not None and drop < 22 * unit:
             wob, flash = 0.0, False
             if shot and shot.get("hit") and now >= shot["t_hit"]:
                 a = now - shot["t_hit"]
-                wob = math.sin(a / 38.0) * max(0.0, 1 - a / 420.0) * U * 1.5
+                wob = math.sin(a / 38.0) * max(0.0, 1 - a / 420.0) * unit * 1.5
                 flash = a < 110
             tx = self.TARGET_X + wob
-            for x, y, w, h in ((-7, -22, 14, 14), (-2, -10, 4, 10)):          # outline
-                self.crect(tx + x * U, y * U + drop, w * U, h * U, PX_DARK)
+            for x, y, w, h in ((-7, -22, 14, 14), (-2, -10, 4, 10)):  # outline
+                self.clipped_rect(tx + x * unit, y * unit + drop, w * unit, h * unit, PX_DARK)
             for x, y, w, h, c in ((-6, -21, 12, 12, HOLSTER), (-1, -9, 2, 9, HOLSTER),
                                   (-5, -20, 10, 10, PX_WHITE), (-4, -19, 8, 8, "#e43b44"),
                                   (-3, -18, 6, 6, PX_WHITE), (-2, -17, 4, 4, "#e43b44"),
                                   (-1, -16, 2, 2, PX_WHITE)):
-                self.crect(tx + x * U, y * U + drop, w * U, h * U, "#ffffff" if flash else c)
+                self.clipped_rect(tx + x * unit, y * unit + drop, w * unit, h * unit, "#ffffff" if flash else c)
 
-        my = self.MUZZLE[1] * U
+        my = self.MUZZLE[1] * unit
         if shot:
             age = now - shot["t0"]
             if shot["hit"]:
-                mx = self.FIG_X[0] + self.MUZZLE[0] * U
+                mx = self.FIG_X[0] + self.MUZZLE[0] * unit
                 if now < shot["t_hit"]:
                     self.draw_bullet(mx + self.TRAIN_BULLET_V * age, my, 1)
                 if 0 <= age < 110:
-                    self.draw_star(mx + 2 * U, my, U * (1.2 + 0.8 * (1 - age / 110.0)))
+                    self.draw_star(mx + 2 * unit, my, unit * (1.2 + 0.8 * (1 - age / 110.0)))
                 a = now - shot["t_hit"]
                 if 0 <= a < 240:
-                    self.draw_star(self.TARGET_X - 6 * U, my, U * (2 + 4 * ease(a / 240.0)))
+                    self.draw_star(self.TARGET_X - 6 * unit, my, unit * (2 + 4 * ease(a / 240.0)))
             else:
-                ux, uy = self.FIG_X[0] + 6 * U, -28 * U
+                ux, uy = self.FIG_X[0] + 6 * unit, -28 * unit
                 if uy - 0.8 * age > -420:
                     self.draw_bullet(ux, uy - 0.8 * age, 0, vertical=True)
                 if 0 <= age < 110:
-                    self.draw_star(ux, uy - 2 * U, U * 1.4)
-        for q in tr.get("parts", []):                                # sparks
+                    self.draw_star(ux, uy - 2 * unit, unit * 1.4)
+        for q in tr.get("parts", []):  # sparks
             age = now - q["t0"]
             if 0 <= age < q["life"]:
                 k = age / q["life"]
@@ -1482,7 +1505,7 @@ class DuelArena:
                 self.finish()
             return
         p = self.plan
-        if self.freeze > 0:                  # hit-stop: time stands still
+        if self.freeze > 0:  # hit-stop: time stands still
             self.freeze -= real_dt
             return
         nt = self.t + real_dt * self.speed
@@ -1511,7 +1534,7 @@ class DuelArena:
         self.redraw()
 
     def play_void(self, on_done, speed=1.0):
-        self.plan, self.plan_key = None, None
+        self.plan, self.plan_key = {}, None
         self.mode, self.t, self.speed = "void", 0.0, speed
         self.done_cb, self.text = on_done, None
         self.last = time.perf_counter()
@@ -1519,13 +1542,13 @@ class DuelArena:
         self.redraw()
 
     def show_ready(self, text=None, color=PX_WHITE, scale=6, top=None):
-        self.mode, self.plan, self.plan_key = "static", None, None
+        self.mode, self.plan, self.plan_key = "static", {}, None
         self.text = (text, color, scale, top) if text else None
         self.redraw()
 
     def show_final(self, winner, loser, text=None, color=PX_YELLOW, scale=7):
         key = (winner, loser)
-        if self.plan_key != key or self.plan is None:
+        if self.plan_key != key or not self.plan:
             self.plan = self.make_plan(winner, loser, None, False)
             self.plan_key = key
         self.mode = "static"
@@ -1537,12 +1560,13 @@ class DuelArena:
             self.finish()
 
     def finish(self):
-        cb, self.done_cb = self.done_cb, None
+        cb = self.done_cb
+        self.done_cb = None
         if self.mode == "duel":
             self.show_final(self.plan["W"], self.plan["L"], "KO!")
         else:
             self.show_ready("TOO SLOW!")
-        if cb:
+        if cb is not None:
             cb()
 
     def stop(self):
@@ -1562,6 +1586,45 @@ class DuelArena:
 # The game
 # ============================================================
 class ReactionDuel:
+    # Attributes that are assigned in reset_game_data(), build_*() and show_*() are declared
+    # here, so every attribute of the app is documented in one place.
+    state: str
+    players: list[Player]
+    total_slots: int
+    round_log: list[Any]
+    sudden_death: bool
+    sd_players: set[int]
+    round_players: set[int]
+    locked_out: set[int]
+    presses: dict[int, float]
+    collecting: bool
+    go_time: float
+    countdown_value: int
+    report: dict[str, Any]
+    notice: str
+    paused_state: Optional[str]
+    match_winner: Optional[int]
+    bar: tk.Frame
+    btn_row: tk.Frame
+    chip_row: tk.Frame
+    round_lbl: TextLabel
+    dots: tk.Canvas
+    main_lbl: TextLabel
+    sub_lbl: TextLabel
+    table: tk.Frame
+    btn_primary: FlatButton
+    btn_pause: FlatButton
+    btn_menu: FlatButton
+    tr_stat: dict[str, TextLabel]
+    tr_box: tk.Frame
+    tr_box_lbl: TextLabel
+    tr_rows: list[TextLabel]
+    tr_strip: tk.Canvas
+    tr_rating: TextLabel
+    tr_coach: TextLabel
+    tr_btn_pause: FlatButton
+    tr_btn_tempo: FlatButton
+
     def __init__(self, root):
         self.root = root
         root.title("Reaction Duel")
@@ -1576,20 +1639,20 @@ class ReactionDuel:
         self.cur_bg, self.cur_fg = THEMES["Classic"]["idle"]
         self.rebind_target = None
         self.settings_msg = ""
-        self.down = set()           # keys currently held (ignores auto-repeat)
-        self.jobs = {}              # named after() callbacks
+        self.down: set[str] = set()  # keys currently held (ignores auto-repeat)
+        self.jobs = {}  # named after() callbacks
         self.shake_job = None
         self.confetti = []
         self.confetti_job = None
         self.overlay = None
         self.gf = None
-        self.arena = None           # pixel duel scene in the game screen
-        self.menu_arena = None      # decorative duel figures on the menu
-        self.backdrop = None        # full-window pixel scenery (Pixel theme)
-        self.bottom = None          # bottom info panel (Pixel game screen)
+        self.arena: Optional[DuelArena] = None  # pixel duel scene in the game screen
+        self.menu_arena: Optional[DuelArena] = None  # decorative duel figures on the menu
+        self.backdrop: Optional[PixelBackdrop] = None  # full-window pixel scenery (Pixel theme)
+        self.bottom: Optional[PixelPanel] = None  # bottom info panel (Pixel game screen)
         self.showdown_then = None
-        self.outfits = [dict(o) for o in DEFAULT_OUTFITS]   # what the duel fighters wear
-        self.mode = "duel"                                  # duel | solo
+        self.outfits = [dict(o) for o in DEFAULT_OUTFITS]  # what the duel fighters wear
+        self.mode = "duel"  # duel | solo
         self.pick_vals, self.pick_swatch, self.pick_edges = {}, {}, {}
         self.tr_trials, self.tr_state, self.tr_paused, self.tr_t0 = [], "intro", False, 0.0
         self.reset_game_data()
@@ -1611,11 +1674,23 @@ class ReactionDuel:
         return THEMES[self.settings.theme]
 
     @property
+    def bd(self) -> PixelBackdrop:
+        """The scenery of the current Pixel screen (only valid while one is showing)."""
+        if self.backdrop is None:
+            raise RuntimeError("this screen has no pixel backdrop")
+        return self.backdrop
+
+    def need_arena(self) -> DuelArena:
+        if self.arena is None:
+            raise RuntimeError("this screen has no duel arena")
+        return self.arena
+
+    @property
     def pixel(self):
         return bool(self.theme.get("pixel"))
 
     def player_color(self, idx):
-        if self.pixel and idx < 2:           # the two duel fighters wear their chosen color
+        if self.pixel and idx < 2:  # the two duel fighters wear their chosen color
             return self.outfits[idx]["color"]
         colors = self.theme["players"]
         return colors[idx % len(colors)]
@@ -1779,8 +1854,8 @@ class ReactionDuel:
                  width=12).pack(pady=(0, 12))
         self.root.update_idletasks()
         panel_h = panel.winfo_reqheight()
-        bd = self.backdrop
-        bd.ground_fn = lambda W, H: H - panel_h - 16 - 80
+        bd = self.bd
+        bd.ground_fn = lambda width, height: height - panel_h - 16 - 80
         self.menu_arena = DuelArena(bd, self.outfits)
         self.menu_arena.show_ready("REACTION DUEL", self.theme["accent"], 9, top=84)
         bd.apply()
@@ -1812,7 +1887,7 @@ class ReactionDuel:
 
     def stepper_row(self, parent, row, title, value_text, on_minus, on_plus):
         self.label(parent, title, 14, anchor="w").grid(row=row, column=0, sticky="w",
-                                                      pady=6, padx=(0, 18))
+                                                       pady=6, padx=(0, 18))
         ctl = tk.Frame(parent, bg=self.cur_bg)
         ctl.grid(row=row, column=1, sticky="w")
         self.btn(ctl, "-", on_minus, size=14, padx=14, pady=4).pack(side="left")
@@ -1822,7 +1897,7 @@ class ReactionDuel:
     def toggle_row(self, parent, row, title, attr):
         value = getattr(self.settings, attr)
         self.label(parent, title, 14, anchor="w").grid(row=row, column=0, sticky="w",
-                                                      pady=6, padx=(0, 18))
+                                                       pady=6, padx=(0, 18))
         ctl = tk.Frame(parent, bg=self.cur_bg)
         ctl.grid(row=row, column=1, sticky="w")
         self.btn(ctl, "On" if value else "Off",
@@ -1832,7 +1907,7 @@ class ReactionDuel:
     def choice_row(self, parent, row, title, attr, options):
         current = getattr(self.settings, attr)
         self.label(parent, title, 14, anchor="w").grid(row=row, column=0, sticky="w",
-                                                      pady=6, padx=(0, 18))
+                                                       pady=6, padx=(0, 18))
         ctl = tk.Frame(parent, bg=self.cur_bg)
         ctl.grid(row=row, column=1, sticky="w")
         for option in options:
@@ -1875,8 +1950,10 @@ class ReactionDuel:
                          lambda: self.set_option("rounds", clamp(s.rounds - 1, MIN_ROUNDS, MAX_ROUNDS)),
                          lambda: self.set_option("rounds", clamp(s.rounds + 1, MIN_ROUNDS, MAX_ROUNDS)))
         self.stepper_row(left, 2, "Too-slow limit", f"{s.too_slow:.1f} s",
-                         lambda: self.set_option("too_slow", round(clamp(s.too_slow - 0.5, MIN_TOO_SLOW, MAX_TOO_SLOW), 1)),
-                         lambda: self.set_option("too_slow", round(clamp(s.too_slow + 0.5, MIN_TOO_SLOW, MAX_TOO_SLOW), 1)))
+                         lambda: self.set_option("too_slow",
+                                                 round(clamp(s.too_slow - 0.5, MIN_TOO_SLOW, MAX_TOO_SLOW), 1)),
+                         lambda: self.set_option("too_slow",
+                                                 round(clamp(s.too_slow + 0.5, MIN_TOO_SLOW, MAX_TOO_SLOW), 1)))
         self.choice_row(left, 3, "Wait time", "wait", list(WAIT_PRESETS))
         self.toggle_row(left, 4, "3-2-1 countdown", "countdown")
         self.toggle_row(left, 5, "Sound" if IS_MAC else "Sound (Mac only)", "sound")
@@ -1894,9 +1971,9 @@ class ReactionDuel:
         for i in range(s.num_players):
             row = i + 2
             self.swatch_widget(right, self.player_color(i), 14).grid(row=row, column=0,
-                                                                   padx=(0, 6), pady=2)
+                                                                     padx=(0, 6), pady=2)
             var = tk.StringVar(value=self.names[i])
-            var.trace_add("write", lambda *_a, i=i, v=var: self.set_name(i, v))
+            var.trace_add("write", lambda *_a, idx=i, v=var: self.set_name(idx, v))
             entry = tk.Entry(right, textvariable=var, width=11, font=(FONT, 13),
                              bg="#ffffff", fg="#111111", insertbackground="#111111",
                              relief="flat", highlightthickness=2,
@@ -1906,7 +1983,7 @@ class ReactionDuel:
             entry.bind("<Return>", lambda _e: self.root.focus_set())
             waiting = self.rebind_target == i
             self.btn(right, "Press key..." if waiting else f"Key: {key_label(self.keys[i])}",
-                     lambda i=i: self.start_rebind(i),
+                     lambda idx=i: self.start_rebind(idx),
                      "primary" if waiting else "secondary", 11, padx=8, pady=4,
                      width=12).grid(row=row, column=2, padx=6, pady=2)
 
@@ -1925,6 +2002,8 @@ class ReactionDuel:
 
     def handle_rebind(self, key):
         idx = self.rebind_target
+        if idx is None:
+            return
         if key == "escape":
             self.rebind_target = None
             self.settings_msg = "Rebind cancelled."
@@ -1992,23 +2071,23 @@ class ReactionDuel:
         self.state = IDLE
         self.players = []
         self.total_slots = 0
-        self.round_log = []         # winner index or VOID, one per finished round
+        self.round_log = []  # winner index or VOID, one per finished round
         self.sudden_death = False
         self.sd_players = set()
         self.round_players = set()  # who is taking part in the current round
         self.locked_out = set()
-        self.presses = {}           # player index -> reaction time in ms
+        self.presses = {}  # player index -> reaction time in ms
         self.collecting = False
         self.go_time = 0.0
         self.countdown_value = 0
-        self.report = None
+        self.report = {}
         self.notice = ""
         self.paused_state = None
-        self.match_winner = None    # who actually won the whole match
+        self.match_winner = None  # who actually won the whole match
 
     def new_match(self):
         self.reset_game_data()
-        if self.mode == "solo":              # you vs a bot
+        if self.mode == "solo":  # you vs a bot
             self.players = [
                 Player(0, (self.names[0].strip() or "Player 1"), self.keys[0]),
                 Player(1, f"Bot {self.settings.bot_level}", "", bot=True),
@@ -2082,7 +2161,7 @@ class ReactionDuel:
 
     def build_game_widgets_pixel(self):
         """Pixel layout: HUD panel on top, the desert scene in the middle, info panel below."""
-        root = self.gf                      # the full-window backdrop canvas
+        root = self.gf  # the full-window backdrop canvas
         bg, fg = PANEL_BG, PANEL_FG
         two = len(self.players) == 2
 
@@ -2096,7 +2175,7 @@ class ReactionDuel:
         self.dots.pack(pady=(0, 4))
 
         self.bottom = PixelPanel(root, bg=bg, edge=PX_SLATE)
-        if two:                             # fixed size so the scene above never jumps around
+        if two:  # fixed size so the scene above never jumps around
             self.bottom.configure(width=PX_BOTTOM_W, height=PX_BOTTOM_H)
             self.bottom.pack_propagate(False)
             self.bottom.pack(side="bottom", pady=(0, 12))
@@ -2123,12 +2202,12 @@ class ReactionDuel:
         self.btn_menu = FlatButton(self.btn_row, "Main Menu", self.show_menu, self.theme,
                                    bg, fg, "secondary", 15)
 
-        bd = self.backdrop
+        bd = self.bd
         if two:
             self.arena = DuelArena(bd, self.outfits, sfx=self.play, shake=self.shake)
-            bd.ground_fn = lambda W, H: H - PX_BOTTOM_H - 12 - 70
+            bd.ground_fn = lambda width, height: height - PX_BOTTOM_H - 12 - 70
         else:
-            bd.ground_fn = lambda W, H: int(H * 0.70)
+            bd.ground_fn = lambda width, height: int(height * 0.70)
         bd.apply()
 
     # ============================================================
@@ -2144,8 +2223,9 @@ class ReactionDuel:
             return
         if self.pixel:
             bg, fg = PANEL_BG, PANEL_FG
-            self.backdrop.set_palette({WAITING: "wait", GO: "go"}.get(self.state, "idle"))
-            self.bottom.set_edge({WAITING: PX_ALERT, GO: PX_GREEN}.get(self.state, PX_SLATE))
+            self.bd.set_palette({WAITING: "wait", GO: "go"}.get(self.state, "idle"))
+            if self.bottom is not None:
+                self.bottom.set_edge({WAITING: PX_ALERT, GO: PX_GREEN}.get(self.state, PX_SLATE))
         else:
             bg, fg = self.state_colors()
             self.root.configure(bg=bg)
@@ -2172,7 +2252,7 @@ class ReactionDuel:
         if s in (ROUND_OVER, MATCH_OVER) and self.report:
             winner = self.report.get("winner")
             if s == MATCH_OVER and self.match_winner is not None:
-                winner = self.match_winner          # the match winner stands, whoever took the last round
+                winner = self.match_winner  # the match winner stands, whoever took the last round
             if winner is not None:
                 a.show_final(winner, 1 - winner, "WINNER!" if s == MATCH_OVER else "KO!", accent)
             else:
@@ -2208,7 +2288,7 @@ class ReactionDuel:
         for c in range(MAX_PLAYERS):
             self.chip_row.grid_columnconfigure(c, weight=1 if c < cols else 0,
                                                uniform="chip" if c < cols else "")
-        big = (n <= 4) if pix else (n <= 5)
+        big = n <= 4 if pix else n <= 5
         chip_bg = mix(bg, fg, 0.08 if pix else 0.12)
         muted = mix(bg, fg, 0.45)
         winner_idx = self.report.get("winner") if self.report else None
@@ -2220,9 +2300,11 @@ class ReactionDuel:
             dim = out or sitting
             won = show_winner and winner_idx == p.index
             border = self.theme["accent"] if won else (muted if dim else self.player_color(p.index))
+            chip: tk.Frame
+            host: tk.Frame
             if pix:
-                chip = PixelPanel(self.chip_row, bg=chip_bg, edge=border, thick=3, inset=2)
-                host = chip.body
+                chip_panel = PixelPanel(self.chip_row, bg=chip_bg, edge=border, thick=3, inset=2)
+                chip, host = chip_panel, chip_panel.body
             else:
                 chip = tk.Frame(self.chip_row, bg=chip_bg, highlightthickness=4,
                                 highlightbackground=border, highlightcolor=border)
@@ -2276,39 +2358,39 @@ class ReactionDuel:
             else:
                 current = in_play and i == played
                 shape(x0, y0, x1, y1, outline=fg if current else muted,
-                              width=4 if current else 2)
+                      width=4 if current else 2)
                 if is_sd_slot:
                     c.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="!", fill=accent,
                                   font=(FONT, 12, "bold"))
 
-    def render_texts(self, bg, fg):
+    def render_texts(self, _bg, fg):
         s = self.state
         size = 56
         if s == IDLE:
-            main = "Ready?"
+            headline = "Ready?"
             sub = "Click Start Round or press Space.\nFingers on your keys - wait for GO!"
         elif s == COUNTDOWN:
-            main, sub, size = str(self.countdown_value), "Get ready...", 96
+            headline, sub, size = str(self.countdown_value), "Get ready...", 96
         elif s == WAITING:
-            main, sub, size = "WAIT...", (self.notice or "Don't press yet!"), 72
+            headline, sub, size = "WAIT...", (self.notice or "Don't press yet!"), 72
         elif s == GO:
             if self.collecting and self.presses:
-                first = min(self.presses, key=self.presses.get)
-                main = f"{self.players[first].name} hit first!"
+                first = min(self.presses, key=lambda k: self.presses[k])
+                headline = f"{self.players[first].name} hit first!"
                 sub, size = "Waiting for the others...", 48
             else:
-                main, sub, size = "GO!", "", 110
+                headline, sub, size = "GO!", "", 110
         elif s == SHOWDOWN:
-            main, sub, size = "SLOW-MO!", "Press Space to skip", 40
+            headline, sub, size = "SLOW-MO!", "Press Space to skip", 40
         else:
             rep = self.report or {}
-            main, sub, size = rep.get("headline", ""), rep.get("detail", ""), 40
+            headline, sub, size = rep.get("headline", ""), rep.get("detail", ""), 40
 
-        if self.arena is not None:      # the scene tells the story; keep the text compact
+        if self.arena is not None:  # the scene tells the story; keep the text compact
             size = min(size, 30)
         round_color = self.theme["accent"] if self.sudden_death else fg
         self.round_lbl.set(text=self.round_text(), fg=round_color)
-        self.main_lbl.set(text=main, fg=fg, size=size)
+        self.main_lbl.set(text=headline, fg=fg, size=size)
         self.sub_lbl.set(text=sub, fg=fg)
 
     def render_table(self, bg, fg):
@@ -2337,10 +2419,9 @@ class ReactionDuel:
             TextLabel(self.table, row["delta"], size, False, muted, bg, pix, width=10,
                       anchor="e").grid(row=r, column=4, pady=pad)
 
-    def render_buttons(self, bg, fg):
+    def render_buttons(self, _bg, _fg):
         for b in (self.btn_primary, self.btn_pause, self.btn_menu):
             b.pack_forget()
-            b.set_screen(bg, fg)
         s = self.state
         if s == IDLE:
             self.btn_primary.set_text("Start Round  (Space)")
@@ -2384,7 +2465,7 @@ class ReactionDuel:
         self.locked_out = set()
         self.presses = {}
         self.collecting = False
-        self.report = None
+        self.report = {}
         self.notice = notice
         if self.settings.countdown:
             self.run_countdown(3)
@@ -2461,7 +2542,7 @@ class ReactionDuel:
         self.cancel("collect")
         self.cancel("timeout")
         if self.presses:
-            self.resolve_round_win(min(self.presses, key=self.presses.get))
+            self.resolve_round_win(min(self.presses, key=lambda k: self.presses[k]))
 
     # ---------- results ----------
     def build_rows(self, default_winner=None):
@@ -2516,7 +2597,7 @@ class ReactionDuel:
                 delta = self.presses[loser] - self.presses[winner]
             speed = SLOWMO[self.settings.slowmo]
             self.run_showdown(
-                lambda done: self.arena.play_duel(winner, loser, delta, by_default, done, speed),
+                lambda done: self.need_arena().play_duel(winner, loser, delta, by_default, done, speed),
                 lambda: self.commit_round_win(winner, by_default, quiet=True))
         else:
             self.commit_round_win(winner, by_default)
@@ -2568,7 +2649,7 @@ class ReactionDuel:
         """Players who would win the whole match by winning the NEXT round."""
         if self.sudden_death or self.state == MATCH_OVER or len(self.players) < 2:
             return []
-        after = self.total_slots - len(self.round_log) - 1          # rounds left after that one
+        after = self.total_slots - len(self.round_log) - 1  # rounds left after that one
         if after < 0 or (after > 0 and not self.settings.early_clinch):
             return []
         out = []
@@ -2595,7 +2676,7 @@ class ReactionDuel:
         self.report = report
         self.play("win")
         self.render()
-        if not quiet:               # the duel scene already shook the screen
+        if not quiet:  # the duel scene already shook the screen
             self.shake(8, 8)
 
     def end_match(self, winner, report, quiet=False):
@@ -2617,7 +2698,7 @@ class ReactionDuel:
         self.cancel_jobs()
         if self.showdown_enabled():
             speed = SLOWMO[self.settings.slowmo]
-            self.run_showdown(lambda done: self.arena.play_void(done, speed),
+            self.run_showdown(lambda done: self.need_arena().play_void(done, speed),
                               lambda: self.commit_void(headline, reason, quiet=True))
         else:
             self.commit_void(headline, reason)
@@ -2652,17 +2733,17 @@ class ReactionDuel:
         self.sync_font()
         if self.pixel:
             self.cur_bg, self.cur_fg = PANEL_BG, PANEL_FG
-            ov = PixelPanel(self.stage, bg=PANEL_BG, edge=self.theme["accent"])
-            ov.place(relx=0.5, rely=0.5, anchor="center")
-            host = ov.body
-            self.overlay = ov
+            panel = PixelPanel(self.stage, bg=PANEL_BG, edge=self.theme["accent"])
+            panel.place(relx=0.5, rely=0.5, anchor="center")
+            host = panel.body
+            self.overlay = panel
         else:
             bg, fg = self.theme["idle"]
             self.cur_bg, self.cur_fg = bg, fg
-            ov = tk.Frame(self.stage, bg=bg)
-            ov.place(x=0, y=0, relwidth=1, relheight=1)
-            host = ov
-            self.overlay = ov
+            cover = tk.Frame(self.stage, bg=bg)
+            cover.place(x=0, y=0, relwidth=1, relheight=1)
+            host = cover
+            self.overlay = cover
             self.root.configure(bg=bg)
 
         self.label(host, "PAUSED", 48, True).pack(pady=(30, 0), padx=60)
@@ -2725,7 +2806,7 @@ class ReactionDuel:
     def begin_play(self):
         two = self.mode == "solo" or self.settings.num_players == 2
         if self.pixel and two:
-            self.show_picker()           # outfits + arena for one or two players
+            self.show_picker()  # outfits + arena for one or two players
         else:
             self.show_game(True)
 
@@ -2745,8 +2826,9 @@ class ReactionDuel:
         self.btn(f, "Back", self.show_menu, "secondary", 16, width=18, pady=8).pack(pady=(10, 14))
 
     # ---------- outfit + arena picker (Pixel theme) ----------
-    def color_name(self, hexcode):
-        return next((n for n, c in OUTFIT_COLORS if c == hexcode), "Custom")
+    @staticmethod
+    def color_name(hex_color):
+        return next((n for n, c in OUTFIT_COLORS if c == hex_color), "Custom")
 
     def picker_value(self, key):
         """Text shown for one picker row."""
@@ -2817,8 +2899,8 @@ class ReactionDuel:
 
         self.root.update_idletasks()
         panel_h = panel.winfo_reqheight()
-        bd = self.backdrop
-        bd.ground_fn = lambda W, H: H - panel_h - 14 - 70
+        bd = self.bd
+        bd.ground_fn = lambda width, height: height - panel_h - 14 - 70
         self.menu_arena = DuelArena(bd, self.outfits)
         self.menu_arena.show_ready("SOLO" if solo else "DUEL", self.theme["accent"], 10, top=70)
         bd.apply()
@@ -2833,14 +2915,14 @@ class ReactionDuel:
         for _ in range(len(opts)):
             i = (i + step) % len(opts)
             if key != "color" or opts[i] != self.outfits[1 - slot]["color"]:
-                break                         # never let both fighters share a color
+                break  # never let both fighters share a color
         self.outfits[slot][key] = opts[i]
         self.picker_refresh()
 
     def picker_arena(self, step):
         i = (ARENA_NAMES.index(self.settings.arena) + step) % len(ARENA_NAMES)
         self.settings.arena = ARENA_NAMES[i]
-        self.backdrop.set_arena(self.settings.arena)
+        self.bd.set_arena(self.settings.arena)
         self.picker_refresh()
 
     def picker_bot(self, step):
@@ -2896,12 +2978,14 @@ class ReactionDuel:
         bg, fg = (PANEL_BG, PANEL_FG) if pix else self.theme["idle"]
         accent = self.theme["accent"]
 
-        top = PixelPanel(f, bg=bg, edge=PX_SLATE) if pix else tk.Frame(f, bg=bg)
-        top_body = top.body if pix else top
+        top_body: tk.Frame
         if pix:
-            top.pack(side="top", fill="x", padx=12, pady=(12, 0))
+            top_panel = PixelPanel(f, bg=bg, edge=PX_SLATE)
+            top_panel.pack(side="top", fill="x", padx=12, pady=(12, 0))
+            top_body = top_panel.body
         else:
-            top.pack(side="top", fill="x", padx=14, pady=(12, 0))
+            top_body = tk.Frame(f, bg=bg)
+            top_body.pack(side="top", fill="x", padx=14, pady=(12, 0))
         TextLabel(top_body, "TRAINER", 24, True, accent, bg, pix).pack(pady=(4, 0))
         hint = f"press SPACE, {key_label(self.keys[0])} or click when it turns GREEN"
         TextLabel(top_body, hint, 12, False, mix(bg, fg, 0.6), bg, pix).pack()
@@ -2910,9 +2994,10 @@ class ReactionDuel:
         self.tr_stat = {}
         for key, title in (("trials", "TRIALS"), ("best", "BEST"), ("avg", "AVERAGE"),
                            ("last5", "LAST 5"), ("trend", "TREND"), ("errors", "ERRORS")):
+            chip: tk.Frame
             if pix:
-                chip = PixelPanel(chips, bg=mix(bg, fg, 0.08), edge=PX_SLATE, thick=3, inset=3)
-                host = chip.body
+                stat_panel = PixelPanel(chips, bg=mix(bg, fg, 0.08), edge=PX_SLATE, thick=3, inset=3)
+                chip, host = stat_panel, stat_panel.body
             else:
                 chip = tk.Frame(chips, bg=mix(bg, fg, 0.12), highlightthickness=2,
                                 highlightbackground=PX_SLATE)
@@ -2925,24 +3010,26 @@ class ReactionDuel:
             self.tr_stat[key] = val
 
         bottom_h = 236
+        bottom_host: tk.Frame
         if pix:
-            bottom = PixelPanel(f, bg=bg, edge=PX_SLATE)
-            bottom.configure(width=940, height=bottom_h)
-            bottom.pack_propagate(False)
-            bottom.pack(side="bottom", pady=(0, 12))
-            bhost = bottom.body
+            bottom_panel = PixelPanel(f, bg=bg, edge=PX_SLATE)
+            bottom_panel.configure(width=940, height=bottom_h)
+            bottom_panel.pack_propagate(False)
+            bottom_panel.pack(side="bottom", pady=(0, 12))
+            bottom_host = bottom_panel.body
         else:
-            bottom = tk.Frame(f, bg=bg, height=bottom_h)
-            bottom.pack_propagate(False)
-            bottom.pack(side="bottom", fill="x", padx=14, pady=(0, 12))
-            bhost = bottom
-        self.trainer_build_bottom(bhost, bg, fg, pix)
+            bottom_frame = tk.Frame(f, bg=bg, height=bottom_h)
+            bottom_frame.pack_propagate(False)
+            bottom_frame.pack(side="bottom", fill="x", padx=14, pady=(0, 12))
+            bottom_host = bottom_frame
+        self.trainer_build_bottom(bottom_host, bg, fg, pix)
 
         if pix:
-            bd = self.backdrop
-            self.arena = DuelArena(bd, self.outfits, sfx=self.play, shake=self.shake)
-            self.arena.trainer_begin()
-            bd.ground_fn = lambda W, H: H - bottom_h - 12 - 70
+            bd = self.bd
+            trainer_arena = DuelArena(bd, self.outfits, sfx=self.play, shake=self.shake)
+            self.arena = trainer_arena
+            trainer_arena.trainer_begin()
+            bd.ground_fn = lambda width, height: height - bottom_h - 12 - 70
             bd.canvas.bind("<Button-1>", lambda _e: self.trainer_press())
             bd.apply()
         else:
@@ -2980,17 +3067,17 @@ class ReactionDuel:
         self.tr_coach = TextLabel(right, "", 14, False, fg, bg, pix, wraplength=390,
                                   justify="left", anchor="w")
         self.tr_coach.pack(anchor="w", pady=(2, 4))
-        btns = tk.Frame(right, bg=bg)
-        btns.pack(side="bottom", anchor="w")
-        self.tr_btn_pause = self.btn(btns, "Pause", self.trainer_toggle_pause, "secondary", 11,
+        button_row = tk.Frame(right, bg=bg)
+        button_row.pack(side="bottom", anchor="w")
+        self.tr_btn_pause = self.btn(button_row, "Pause", self.trainer_toggle_pause, "secondary", 11,
                                      padx=12, pady=6)
         self.tr_btn_pause.pack(side="left", padx=2)
-        self.btn(btns, "Reset", self.trainer_reset, "secondary", 11, padx=12,
+        self.btn(button_row, "Reset", self.trainer_reset, "secondary", 11, padx=12,
                  pady=6).pack(side="left", padx=2)
-        self.tr_btn_tempo = self.btn(btns, f"Tempo: {self.settings.trainer_tempo}",
+        self.tr_btn_tempo = self.btn(button_row, f"Tempo: {self.settings.trainer_tempo}",
                                      self.trainer_cycle_tempo, "secondary", 11, padx=12, pady=6)
         self.tr_btn_tempo.pack(side="left", padx=2)
-        self.btn(btns, "Back", self.show_more, "primary", 11, padx=12, pady=6).pack(side="left", padx=2)
+        self.btn(button_row, "Back", self.show_more, "primary", 11, padx=12, pady=6).pack(side="left", padx=2)
 
     # ---------- the drill loop ----------
     def trainer_tempo(self):
@@ -3079,8 +3166,8 @@ class ReactionDuel:
         self.tr_btn_tempo.set_text(f"Tempo: {self.settings.trainer_tempo}")
 
     # ---------- visuals ----------
-    GOOD_COLOR = "#5de07b"          # faster than the last click
-    BAD_COLOR = "#ff5a5f"           # slower / early / missed
+    GOOD_COLOR = "#5de07b"  # faster than the last click
+    BAD_COLOR = "#ff5a5f"  # slower / early / missed
 
     def trainer_visual(self, kind, trial=None):
         accent = self.theme["accent"]
@@ -3097,14 +3184,15 @@ class ReactionDuel:
         elif kind == "hit":
             ms = trial["ms"]
             text, scale = f"{ms:.0f} MS", 8
-            color = (self.GOOD_COLOR if trial["delta"] < 0 else self.BAD_COLOR) if trial["delta"] is not None else accent
+            color = (self.GOOD_COLOR if trial["delta"] < 0 else self.BAD_COLOR) if trial[
+                                                                                       "delta"] is not None else accent
         elif kind == "early":
             text, color = "TOO EARLY!", self.BAD_COLOR
         elif kind == "miss":
             text, color = "TOO SLOW!", self.BAD_COLOR
         if self.pixel:
-            self.backdrop.set_palette(palette)
-            a = self.arena
+            self.bd.set_palette(palette)
+            a = self.need_arena()
             if kind == "arm" or kind == "intro":
                 a.trainer_arm()
             elif kind == "signal":
@@ -3134,15 +3222,17 @@ class ReactionDuel:
             elif kind == "hit":
                 self.play("hit")
 
-    def trainer_stats(self):
+    def trainer_stats(self) -> dict[str, Any]:
         hits = [t["ms"] for t in self.tr_trials if t["kind"] == "hit"]
-        out = dict(trials=len(self.tr_trials), hits=hits,
-                   errors=sum(1 for t in self.tr_trials if t["kind"] != "hit"))
-        out["best"] = min(hits) if hits else None
-        out["avg"] = sum(hits) / len(hits) if hits else None
-        out["last5"] = sum(hits[-5:]) / len(hits[-5:]) if hits else None
-        out["trend"] = (sum(hits[-5:]) / 5 - sum(hits[-10:-5]) / 5) if len(hits) >= 10 else None
-        return out
+        return {
+            "trials": len(self.tr_trials),
+            "hits": hits,
+            "errors": sum(1 for t in self.tr_trials if t["kind"] != "hit"),
+            "best": min(hits) if hits else None,
+            "avg": sum(hits) / len(hits) if hits else None,
+            "last5": sum(hits[-5:]) / len(hits[-5:]) if hits else None,
+            "trend": (sum(hits[-5:]) / 5 - sum(hits[-10:-5]) / 5) if len(hits) >= 10 else None,
+        }
 
     def trainer_refresh(self):
         st = self.trainer_stats()
@@ -3192,7 +3282,7 @@ class ReactionDuel:
         for i, t in enumerate(trials):
             x0 = 4 + i * 14
             if t["kind"] == "hit":
-                h = 6 + clamp((t["ms"] - 120) / 480.0, 0.0, 1.0) * 38     # taller bar = slower
+                h = 6 + clamp((t["ms"] - 120) / 480.0, 0.0, 1.0) * 38  # taller bar = slower
                 color = PX_GREY if t["delta"] is None else (self.GOOD_COLOR if t["delta"] < 0 else self.BAD_COLOR)
                 c.create_rectangle(x0, 46 - h, x0 + 10, 46, fill=color, outline="")
             else:
@@ -3227,7 +3317,7 @@ class ReactionDuel:
             return "TOO EARLY! Don't guess. Wait until the target actually pops up.", rating
         if last["kind"] == "miss":
             return "MISSED IT. Eyes on the target and finger ready. Reset and go again.", rating
-        ms, delta = last["ms"], last["delta"]
+        ms = last["ms"]
         if len(hits) >= 10 and len(hits) % 10 == 0:
             tr = st["trend"]
             word = "faster" if tr < 0 else "slower"
@@ -3274,7 +3364,7 @@ class ReactionDuel:
             if key in ("return", "escape"):
                 self.root.focus_set()
             return
-        if key in self.down:        # auto-repeat from a held key
+        if key in self.down:  # auto-repeat from a held key
             return
         self.down.add(key)
 
