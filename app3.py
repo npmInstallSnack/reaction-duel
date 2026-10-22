@@ -1385,6 +1385,7 @@ class DuelArena:
 
     def trainer_shoot(self, hit):
         """Fire at the target (hit=True) or into the sky because it was too early."""
+        play_sound_effect("gunshot")
         unit = self.U
         now = self._now()
         if hit:
@@ -1522,6 +1523,7 @@ class DuelArena:
         self.t = nt
         while self.ev_i < len(p["events"]) and p["events"][self.ev_i][0] <= self.t:
             self.sfx(p["events"][self.ev_i][1])
+            play_sound_effect("gunshot")
             self.ev_i += 1
         if self.t >= p["end_t"]:
             self.finish()
@@ -2482,6 +2484,8 @@ class ReactionDuel:
         self.play("tick")
         nxt = (lambda: self.run_countdown(n - 1)) if n > 1 else self.enter_waiting
         self.schedule("countdown", COUNTDOWN_STEP_MS, nxt)
+        self.root.update_idletasks()
+        play_sound_effect("countdown")
 
     def enter_waiting(self):
         self.state = WAITING
@@ -3500,6 +3504,12 @@ def play_sound_effect(effect):
     elif effect == "horse neigh":
         notes = [1760, 1568, 1760, 1568, 1319, 1568, 1319,1047 ]
         note_ms = 50
+    elif effect == "gunshot":
+        notes = [2500, 1800, 1200 ]
+        note_ms = 20
+    elif effect == "countdown":
+        notes = [880]
+        note_ms = 150
     else:
         notes = []
         note_ms = 0
