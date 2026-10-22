@@ -1519,6 +1519,7 @@ class DuelArena:
             self.freeze = self.FREEZE_MS
             self.flash_left = 80
             self.sfx("buzz")
+            play_sound_effect("bullet hit")
             self.shake(10, 10)
         self.t = nt
         while self.ev_i < len(p["events"]) and p["events"][self.ev_i][0] <= self.t:
@@ -2508,6 +2509,8 @@ class ReactionDuel:
     def on_timeout(self):
         if self.state == GO and not self.collecting:
             self.void_round("Too slow!", "Nobody pressed in time.")
+            self.root.update_idletasks()
+            play_sound_effect("too slow")
 
     # ---------- input ----------
     def player_press(self, idx):
@@ -2746,6 +2749,8 @@ class ReactionDuel:
         self.cancel_jobs()
         self.paused_state = self.state
         self.build_overlay()
+        self.root.update_idletasks()
+        play_sound_effect("pause")
 
     def build_overlay(self):
         self.sync_font()
@@ -3510,6 +3515,15 @@ def play_sound_effect(effect):
     elif effect == "countdown":
         notes = [880]
         note_ms = 150
+    elif effect == "too slow":
+        notes = [880,784,659,587]
+        note_ms = 200
+    elif effect == "pause":
+        notes = [784,523]
+        note_ms = 80
+    elif effect == "bullet hit":
+        notes = [1800,400,200]
+        note_ms = 20
     else:
         notes = []
         note_ms = 0
