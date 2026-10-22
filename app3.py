@@ -1638,6 +1638,8 @@ class ReactionDuel:
         root.minsize(960, 720)
 
         self.settings = Settings()
+        global current_game
+        current_game = self
         self.names = [f"Player {i + 1}" for i in range(MAX_PLAYERS)]
         self.keys = list(DEFAULT_KEYS)
 
@@ -1962,7 +1964,7 @@ class ReactionDuel:
                                                  round(clamp(s.too_slow + 0.5, MIN_TOO_SLOW, MAX_TOO_SLOW), 1)))
         self.choice_row(left, 3, "Wait time", "wait", list(WAIT_PRESETS))
         self.toggle_row(left, 4, "3-2-1 countdown", "countdown")
-        self.toggle_row(left, 5, "Sound" if IS_MAC else "Sound (Mac only)", "sound")
+        self.toggle_row(left, 5, "Sound" if IS_MAC or sys.platform == "win32" else "Sound (Mac/Windows only)", "sound")
         self.toggle_row(left, 6, "Screen shake", "shake")
         self.toggle_row(left, 7, "Fullscreen", "fullscreen")
         self.toggle_row(left, 8, "Duel animation", "duel_anim")
@@ -3492,6 +3494,8 @@ def main():
 def play_sound_effect(effect):
 
     if sys.platform != "win32":
+        return
+    if not current_game.settings.sound:
         return
 
     if effect == "fanfare":
