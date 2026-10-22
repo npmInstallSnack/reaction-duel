@@ -5,11 +5,9 @@
 
 import math
 import os
-import queue
 import random
 import subprocess
 import sys
-import threading
 import time
 import textwrap
 import tkinter as tk
@@ -24,7 +22,6 @@ if sys.platform == "win32":
 # ============================================================
 FONT = "Helvetica"
 IS_MAC = sys.platform == "darwin"
-IS_WINDOWS = sys.platform == "win32"
 HAND = "pointinghand" if IS_MAC else "hand2"
 PIXEL_FONT = "Monaco" if IS_MAC else "Courier"
 SLOWMO = {"Fast": 1.6, "Normal": 1.0, "Cinematic": 0.7}  # animation speed multipliers
@@ -145,56 +142,6 @@ T = TypeVar("T", int, float)
 
 def clamp(value: T, low: T, high: T) -> T:
     return max(low, min(high, value))
-
-
-# ============================================================
-# Windows sound effects: each effect is a short melody of beeps.
-# winsound.Beep() waits until the note ends, so the melodies play on a
-# background thread (sound_worker) to keep the game from freezing.
-# Written with help from Claude (Anthropic's AI assistant).
-# ============================================================
-SOUND_QUEUE = queue.Queue()
-
-
-def play_sound_effect(effect):
-    if effect == "pause":
-        notes = [784, 523]
-        note_ms = 70
-    elif effect == "win":
-        notes = [523, 659, 784]
-        note_ms = 90
-    elif effect == "lose":
-        notes = [392, 330, 262]
-        note_ms = 220
-    elif effect == "fanfare":
-        notes = [523, 659, 784, 1047, 784, 1047]
-        note_ms = 110
-    elif effect == "tick":
-        notes = [660]
-        note_ms = 60
-    elif effect == "go":
-        notes = [1047]
-        note_ms = 120
-    elif effect == "hit":
-        notes = [880, 1319]
-        note_ms = 45
-    elif effect == "buzz":
-        notes = [220, 165]
-        note_ms = 140
-    elif effect == "void":
-        notes = [440, 349, 294]
-        note_ms = 150
-    else:
-        notes = []
-        note_ms = 0
-    for note in notes:
-        winsound.Beep(note, note_ms)
-
-
-def sound_worker():
-    while True:
-        effect = SOUND_QUEUE.get()
-        play_sound_effect(effect)
 
 
 @dataclass
@@ -1721,8 +1668,6 @@ class ReactionDuel:
         root.bind("<KeyRelease>", self.on_key_release)
         root.bind("<FocusOut>", lambda _e: self.down.clear())
         root.bind("<F11>", lambda _e: self.toggle_fullscreen())
-        if IS_WINDOWS:
-            threading.Thread(target=sound_worker, daemon=True).start()
 
         self.show_menu()
 
@@ -1766,12 +1711,7 @@ class ReactionDuel:
                         bg=bg or self.cur_bg)
 
     def play(self, name):
-        if not self.settings.sound:
-            return
-        if IS_WINDOWS:
-            SOUND_QUEUE.put(name)
-            return
-        if not IS_MAC:
+        if not self.settings.sound or not IS_MAC:
             return
         path = os.path.join(SOUND_DIR, SOUND_FILES[name] + ".aiff")
         if os.path.exists(path):
@@ -2019,7 +1959,7 @@ class ReactionDuel:
                                                  round(clamp(s.too_slow + 0.5, MIN_TOO_SLOW, MAX_TOO_SLOW), 1)))
         self.choice_row(left, 3, "Wait time", "wait", list(WAIT_PRESETS))
         self.toggle_row(left, 4, "3-2-1 countdown", "countdown")
-        self.toggle_row(left, 5, "Sound" if IS_MAC or IS_WINDOWS else "Sound (Mac/Windows only)", "sound")
+        self.toggle_row(left, 5, "Sound" if IS_MAC else "Sound (Mac only)", "sound")
         self.toggle_row(left, 6, "Screen shake", "shake")
         self.toggle_row(left, 7, "Fullscreen", "fullscreen")
         self.toggle_row(left, 8, "Duel animation", "duel_anim")
@@ -2589,6 +2529,7 @@ class ReactionDuel:
     def false_start(self, idx):
         self.locked_out.add(idx)
         self.play("buzz")
+        play_sound_effect("horse neigh")
         eligible = self.round_players - self.locked_out
         if not eligible:
             self.cancel("wait")
@@ -2737,9 +2678,13 @@ class ReactionDuel:
     def show_round_over(self, report, quiet=False):
         self.state = ROUND_OVER
         self.report = report
-        lost_to_bot = self.players[report["winner"]].bot
-        self.play("lose" if lost_to_bot else "win")
+        self.play("win")
         self.render()
+        self.root.update_idletasks()
+        if self.players[report["winner"]].bot:
+            play_sound_effect("oof")
+        else:
+            play_sound_effect("fanfare")
         if not quiet:  # the duel scene already shook the screen
             self.shake(8, 8)
 
@@ -2751,8 +2696,13 @@ class ReactionDuel:
         report["headline"] = f"{self.players[winner].name} wins the match!"
         report["detail"] += f"\nFinal: {final}"
         self.report = report
-        self.play("lose" if self.players[winner].bot else "fanfare")
+        self.play("fanfare")
         self.render()
+        self.root.update_idletasks()
+        if self.players[winner].bot:
+            play_sound_effect("womp womp")
+        else:
+            play_sound_effect("ultra fanfare")
         if not quiet:
             self.shake(14, 14)
         colors = self.theme["players"] + [self.theme["accent"]]
@@ -2792,7 +2742,6 @@ class ReactionDuel:
         self.cancel_jobs()
         self.paused_state = self.state
         self.build_overlay()
-        self.play("pause")
 
     def build_overlay(self):
         self.sync_font()
@@ -3214,7 +3163,6 @@ class ReactionDuel:
                 self.cancel(name)
             self.tr_state = "paused"
             self.tr_btn_pause.set_text("Resume")
-            self.play("pause")
             self.trainer_visual("paused")
 
     def trainer_reset(self):
@@ -3531,8 +3479,34 @@ def main():
     root.mainloop()
 
 
+#Woody's PPR
+def play_sound_effect(effect):
+
+    if sys.platform != "win32":
+        return
+
+    if effect == "fanfare":
+        notes = [523, 659, 784, 1047]
+        note_ms = 100
+    elif effect == "oof":
+        notes = [247,196]
+        note_ms = 90 
+    elif effect == "ultra fanfare":
+        notes = [523, 659, 784, 1047, 784, 1047, 1319]
+        note_ms = 120
+    elif effect == "womp womp":
+        notes = [247, 196]
+        note_ms = 400
+    elif effect == "horse neigh":
+        notes = [1760, 1568, 1760, 1568, 1319, 1568, 1319,1047 ]
+        note_ms = 50
+    else:
+        notes = []
+        note_ms = 0
+    for note in notes:
+        winsound.Beep(note, note_ms)
+        
+
+
 if __name__ == "__main__":
     main()
-
-#Woody's PPR
-
