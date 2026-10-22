@@ -1,6 +1,6 @@
 # Authors: Kahekili Spears, Jack O'Brien, Woody Churchward
 # Date created: 10/20/26
-# Date modified: 10/20/26
+# Date modified: 10/21/26
 # Purpose: Reaction time game
 
 import math
